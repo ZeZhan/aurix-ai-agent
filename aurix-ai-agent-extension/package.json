@@ -1,0 +1,230 @@
+{
+  "name": "aurix-ai-agent-extension",
+  "displayName": "AURIX™ AI Agent",
+  "description": "AURIX™-native Copilot agent — generate, build, and flash TriCore™ from a single chat prompt.",
+  "icon": "media/aurix-ai-icon.png",
+  "version": "0.6.1",
+  "publisher": "zehuazhang",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZeZhan/aurix-ai-agent.git",
+    "directory": "aurix-ai-agent-extension"
+  },
+  "homepage": "https://github.com/ZeZhan/aurix-ai-agent#readme",
+  "bugs": {
+    "url": "https://github.com/ZeZhan/aurix-ai-agent/issues"
+  },
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": [
+    "AI",
+    "Machine Learning",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "aurix",
+    "tricore",
+    "infineon",
+    "embedded",
+    "embedded software",
+    "firmware",
+    "microcontroller",
+    "mcu",
+    "tc3xx",
+    "tc4x",
+    "copilot",
+    "mcp",
+    "ai agent",
+    "illd",
+    "bare-metal"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "aurix-ai-agent.mcp",
+        "label": "AURIX MCP Server"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aurixAiAgent",
+          "title": "AURIX AI",
+          "icon": "media/aurix-ai-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "aurixAiAgent": [
+        {
+          "id": "aurixAiAgent.chatView",
+          "name": "Configurator",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "aurix-ai-agent.selectDevice",
+        "title": "Select Board",
+        "category": "AURIX AI Agent"
+      },
+      {
+        "command": "aurix-ai-agent.selectIdePath",
+        "title": "Select IDE Path",
+        "category": "AURIX AI Agent"
+      },
+      {
+        "command": "aurix-ai-agent.generateConfig",
+        "title": "Generate Copilot Config",
+        "category": "AURIX AI Agent"
+      }
+    ],
+    "configuration": {
+      "title": "AURIX AI Agent",
+      "properties": {
+        "aurix-ai-agent.selectedBoard": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Selected target board for generated AI context."
+        },
+        "aurix-ai-agent.selectedDevice": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Legacy compatibility mirror of the selected board name."
+        },
+        "aurix-ai-agent.defaultBuildCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Optional project build command written to .aurix-ai/context.json. If empty, the extension infers a make-based incremental build when possible."
+        },
+        "aurix-ai-agent.defaultBuildCwd": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Optional working directory for the build command written to .aurix-ai/context.json. Supports ${workspaceFolder}, ${workspaceRoot}, ${program}, ${device}."
+        },
+        "aurix-ai-agent.buildToolchainPath": {
+          "type": "string",
+          "default": "C:\\Infineon\\ide",
+          "scope": "resource",
+          "description": "AURIX Development Studio or Configuration Studio installation root (standard or Limited). The extension detects make, tricore-elf-gcc, and AURIX Flasher from this path."
+        },
+        "aurix-ai-agent.defaultFlashCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Optional flash command template. Supports ${workspaceFolder}, ${program}, ${device}."
+        },
+        "aurix-ai-agent.contextRelativePath": {
+          "type": "string",
+          "default": ".aurix-ai/context.json",
+          "scope": "resource",
+          "description": "Relative path for AI context file."
+        },
+        "aurix-ai-agent.tcfHost": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "scope": "resource",
+          "description": "Default TCF host."
+        },
+        "aurix-ai-agent.tcfPort": {
+          "type": "number",
+          "default": 1534,
+          "scope": "resource",
+          "description": "Default TCF port."
+        },
+        "aurix-ai-agent.devicesJsonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Optional path to devices.json if auto-discovery from aurix-tcf extension is not available."
+        },
+        "aurix-ai-agent.mcpRuntime": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "uv",
+            "python"
+          ],
+          "enumDescriptions": [
+            "Use the bundled uv runtime (auto-provisions Python + dependencies); otherwise fall back to a compatible Python interpreter.",
+            "Always launch via uv. The extension includes uv; it downloads a managed Python and the server's dependencies automatically.",
+            "Always launch via a Python interpreter (see aurix-ai-agent.pythonPath). Requires the server's dependencies to be installed."
+          ],
+          "default": "auto",
+          "scope": "resource",
+          "description": "How to launch the bundled AURIX MCP server. 'auto' (recommended) uses the included uv runtime, so no Python or uv installation is needed."
+        },
+        "aurix-ai-agent.uvPath": {
+          "type": "string",
+          "default": "uv",
+          "scope": "resource",
+          "description": "Optional uv override used to launch the AURIX MCP server. By default the extension uses its bundled uv.exe. Supports ${workspaceFolder}, ${workspaceRoot}, ${extensionPath}."
+        },
+        "aurix-ai-agent.uvPython": {
+          "type": "string",
+          "default": "3.12",
+          "scope": "resource",
+          "description": "Python version uv provisions for the MCP server (e.g. 3.12). uv downloads it automatically if not present."
+        },
+        "aurix-ai-agent.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "scope": "resource",
+          "description": "Python interpreter used to launch the bundled AURIX MCP server when runtime is 'python' (or 'auto' without uv). Must provide the server's Python dependencies (mcp, httpx). Supports ${workspaceFolder}, ${workspaceRoot}, ${extensionPath}."
+        },
+        "aurix-ai-agent.pythonServerDir": {
+          "type": "string",
+          "default": "${extensionPath}/server/aurix-mcp-server-py",
+          "scope": "resource",
+          "description": "Directory of the Python MCP server (containing src/aurix_mcp_server). Used to set PYTHONPATH when the package is not pip-installed. Supports ${workspaceFolder}, ${workspaceRoot}, ${extensionPath}."
+        },
+        "aurix-ai-agent.mcpServerArgs": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments passed to the Python interpreter. If empty, the extension uses -m aurix_mcp_server."
+        },
+        "aurix-ai-agent.mcpServerCwd": {
+          "type": "string",
+          "default": "${workspaceFolder}",
+          "scope": "resource",
+          "description": "Working directory for MCP server process."
+        },
+        "aurix-ai-agent.installCopilotInstructions": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "markdownDeprecationMessage": "Deprecated. Use the **Generate Copilot Config** command or the Configurator panel instead.",
+          "description": "Legacy: auto-install copilot-instructions on activation. Use the Configurator panel instead."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "node .\\scripts\\package-vsix.js"
+  },
+  "devDependencies": {
+    "@types/node": "20.x",
+    "@types/vscode": "^1.79.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.3.3"
+  }
+}

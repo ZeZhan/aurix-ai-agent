@@ -1,0 +1,12 @@
+{
+    "memory-inspector.debugTypes": [
+        "gdb",
+        "embedded-debug",
+        "arm-debugger",
+        "mcuxpresso-debug",
+        "aurix-tcf"
+    ],
+    "aurix-ai-agent.chatMode": "ask",
+    "aurix-ai-agent.buildToolchainPath": "C:\\Infineon\\ide",
+    "aurix-ai-agent.pythonPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+}

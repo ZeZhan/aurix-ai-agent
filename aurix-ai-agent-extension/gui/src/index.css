@@ -1,0 +1,708 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-sideBar-foreground, #e6e6e6);
+  background: var(--vscode-sideBar-background, #1e1e1e);
+  --aurix-accent: #00a1e0;
+  --aurix-accent-dim: #006d99;
+
+  /* ─── Semantic surface tokens (theme-aware via VS Code vars) ─── */
+  /* Use these instead of rgba(255,255,255,0.0X) so light themes stay readable. */
+  --aurix-surface-subtle: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.08));
+  --aurix-surface-1:      var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.04));
+  --aurix-surface-2:      var(--vscode-input-background, rgba(127, 127, 127, 0.10));
+  --aurix-border-subtle:  var(--vscode-panel-border, rgba(127, 127, 127, 0.20));
+  --aurix-border-strong:  var(--vscode-focusBorder, var(--vscode-panel-border, rgba(127, 127, 127, 0.35)));
+  --aurix-text-secondary: var(--vscode-descriptionForeground, #888);
+  --aurix-text-primary:   var(--vscode-editor-foreground, #e6e6e6);
+
+  /* Status colors (use VS Code chart palette so light theme works) */
+  --aurix-success: var(--vscode-charts-green, var(--vscode-testing-iconPassed, #4ec9b0));
+  --aurix-warning: var(--vscode-charts-yellow, #cca700);
+  --aurix-error:   var(--vscode-charts-red, var(--vscode-errorForeground, #f48771));
+}
+
+/* Light theme refinements: VS Code sets `vscode-light` body class */
+.vscode-light, body.vscode-light {
+  --aurix-surface-subtle: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.04));
+  --aurix-surface-1:      var(--vscode-editorWidget-background, rgba(0, 0, 0, 0.03));
+  --aurix-surface-2:      var(--vscode-input-background, rgba(0, 0, 0, 0.06));
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollbar styling to match VS Code */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100, 100, 100, 0.7));
+}
+
+/* ─── Markdown prose overrides ─── */
+.markdown-body { line-height: 1.55; word-wrap: break-word; }
+.markdown-body p { margin: 0.4em 0; }
+.markdown-body ul, .markdown-body ol { margin: 0.3em 0; padding-left: 1.4em; }
+.markdown-body li { margin: 0.15em 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  margin: 0.7em 0 0.3em;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground, #e6e6e6);
+}
+.markdown-body h1 { font-size: 1.3em; }
+.markdown-body h2 { font-size: 1.15em; }
+.markdown-body h3 { font-size: 1.05em; }
+.markdown-body blockquote {
+  margin: 0.4em 0;
+  padding: 0.2em 0.8em;
+  border-left: 3px solid var(--aurix-accent);
+  background: var(--aurix-surface-1);
+  color: var(--aurix-text-secondary);
+}
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.92em;
+  width: 100%;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  padding: 4px 8px;
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--aurix-surface-1);
+  font-weight: 600;
+}
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--vscode-panel-border, #3c3c3c);
+  margin: 0.7em 0;
+}
+.markdown-body strong { color: var(--vscode-editor-foreground, #e6e6e6); }
+.markdown-body a {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+}
+.markdown-body a:hover { text-decoration: underline; }
+
+/* ─── Code blocks ─── */
+.markdown-body pre {
+  position: relative;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-radius: 6px;
+  padding: 0;
+  margin: 0.5em 0;
+  overflow: hidden;
+}
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--aurix-surface-1);
+  border-bottom: 1px solid var(--aurix-border-subtle);
+  font-size: 0.8em;
+  color: var(--aurix-text-secondary);
+}
+.code-block-header .lang-label {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.code-block-header .copy-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  transition: all 0.15s;
+}
+.code-block-header .copy-btn:hover {
+  background: var(--aurix-surface-subtle);
+  border-color: var(--aurix-border-subtle);
+  color: var(--aurix-text-primary);
+}
+.code-block-header .copy-btn.copied { color: var(--aurix-success); }
+
+/* Apply / action buttons in code block header */
+.code-action-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  transition: all 0.15s;
+}
+.code-action-btn:hover {
+  background: var(--aurix-surface-subtle);
+  border-color: var(--aurix-border-subtle);
+  color: var(--aurix-text-primary);
+}
+.code-action-btn.applied { color: var(--aurix-success); }
+
+/* ─── Inline diff rendering ─── */
+.diff-block {
+  padding: 8px 14px;
+  overflow-x: auto;
+  font-family: var(--vscode-editor-font-family, "Cascadia Code", "Fira Code", monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  line-height: 1.5;
+}
+.diff-line {
+  white-space: pre;
+  padding: 0 4px;
+  border-radius: 2px;
+}
+.diff-add {
+  background: var(--vscode-diffEditor-insertedTextBackground, rgba(72, 199, 142, 0.15));
+  color: var(--aurix-success);
+}
+.diff-remove {
+  background: var(--vscode-diffEditor-removedTextBackground, rgba(244, 135, 113, 0.15));
+  color: var(--aurix-error);
+}
+.diff-hunk {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  opacity: 0.8;
+  margin-top: 4px;
+}
+
+.markdown-body pre code {
+  display: block;
+  padding: 10px 14px;
+  overflow-x: auto;
+  font-family: var(--vscode-editor-font-family, "Cascadia Code", "Fira Code", monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  line-height: 1.5;
+  background: transparent;
+}
+
+/* Inline code */
+.markdown-body :not(pre) > code {
+  background: var(--vscode-textCodeBlock-background, var(--aurix-surface-2));
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family, "Cascadia Code", "Fira Code", monospace);
+  font-size: 0.88em;
+  border: 1px solid var(--aurix-border-subtle);
+}
+
+/* ─── Message bubbles ─── */
+.msg-user {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  border-radius: 12px 12px 4px 12px;
+}
+.msg-assistant {
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-editor-foreground, #e6e6e6);
+  border-radius: 12px 12px 12px 4px;
+  border: 1px solid var(--aurix-border-subtle);
+}
+
+/* ─── Streaming cursor ─── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.streaming-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1.1em;
+  background: var(--aurix-accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  animation: blink 0.8s step-end infinite;
+}
+
+/* ─── Welcome screen ─── */
+.welcome-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #0e639c, #00a1e0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 auto 12px;
+  box-shadow: 0 4px 16px rgba(0,161,224,0.25);
+}
+.welcome-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--aurix-border-subtle);
+  background: var(--aurix-surface-1);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 0.85em;
+  color: var(--aurix-text-primary);
+}
+.welcome-chip:hover {
+  background: var(--aurix-surface-subtle);
+  border-color: var(--aurix-accent-dim);
+  color: var(--aurix-text-primary);
+}
+
+/* ─── Status bar ─── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  font-size: 0.78em;
+  color: var(--aurix-text-secondary);
+  border-bottom: 1px solid var(--aurix-border-subtle);
+  background: var(--aurix-surface-1);
+  flex-shrink: 0;
+}
+.status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.green  { background: var(--aurix-success); }
+.status-dot.yellow { background: var(--aurix-warning); }
+.status-dot.red    { background: var(--aurix-error); }
+
+.status-bar-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--aurix-text-secondary);
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  transition: all 0.15s;
+}
+.status-bar-btn:hover {
+  background: var(--aurix-surface-subtle);
+  border-color: var(--aurix-border-subtle);
+  color: var(--aurix-text-primary);
+}
+.status-bar-btn:disabled {
+  cursor: default;
+}
+
+/* ─── Terminal cursor blink ─── */
+@keyframes terminal-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+.terminal-cursor {
+  animation: terminal-blink 1s infinite;
+  color: var(--vscode-terminal-foreground, var(--vscode-editor-foreground, #ccc));
+}
+
+/* ─── Mode toggle (Ask / Agent) ─── */
+.mode-toggle {
+  display: inline-flex;
+  border-radius: 6px;
+  border: 1px solid var(--aurix-border-subtle);
+  overflow: hidden;
+  background: var(--aurix-surface-1);
+}
+.mode-toggle-btn {
+  background: none;
+  border: none;
+  padding: 3px 12px;
+  font-size: 0.78em;
+  font-weight: 500;
+  color: var(--aurix-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.3px;
+}
+.mode-toggle-btn:hover {
+  background: var(--aurix-surface-subtle);
+  color: var(--aurix-text-primary);
+}
+.mode-toggle-btn.active {
+  background: var(--aurix-accent);
+  color: #fff;
+}
+
+/* ─── Message edit / retry hover actions ─── */
+.msg-bubble-wrap {
+  position: relative;
+}
+.msg-actions {
+  display: none;
+  position: absolute;
+  bottom: -6px;
+  gap: 2px;
+}
+.msg-bubble-user .msg-actions {
+  left: 0;
+}
+.msg-bubble-wrap:hover .msg-actions {
+  display: flex;
+}
+.msg-action-btn {
+  background: var(--vscode-input-background, #3c3c3c);
+  border: 1px solid var(--vscode-panel-border, #3c3c3c);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.7em;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+.msg-action-btn:hover {
+  opacity: 1;
+  background: var(--aurix-surface-subtle);
+  border-color: var(--aurix-accent-dim);
+}
+
+/* ─── Thinking shimmer border (input area) ─── */
+@property --shimmer-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.chat-input-glow {
+  position: relative;
+  padding: 1px;
+  border-radius: 10px;
+  background: var(--vscode-input-border, #3c3c3c);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+.chat-input-glow.thinking {
+  background: conic-gradient(
+    from var(--shimmer-angle),
+    var(--aurix-accent) 0%,
+    #7c3aed 25%,
+    #f97316 50%,
+    #4ec9b0 75%,
+    var(--aurix-accent) 100%
+  );
+  animation: shimmer-rotate 2.5s linear infinite;
+  box-shadow:
+    0 0 18px rgba(0, 161, 224, 0.35),
+    0 0 60px rgba(124, 58, 237, 0.15);
+}
+
+@keyframes shimmer-rotate {
+  to { --shimmer-angle: 360deg; }
+}
+
+/* Fallback for browsers without @property: linear gradient animation */
+@supports not (background: conic-gradient(from 0deg, red, blue)) {
+  .chat-input-glow.thinking {
+    background: linear-gradient(90deg, #00a1e0, #7c3aed, #f97316, #4ec9b0, #00a1e0);
+    background-size: 300% 100%;
+    animation: shimmer-linear 2s linear infinite;
+  }
+}
+
+@keyframes shimmer-linear {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+.chat-input-inner {
+  border-radius: 8px;
+  background: var(--vscode-input-background, #3c3c3c);
+  position: relative;
+  z-index: 1;
+}
+
+/* Subtle pulse on the whole input panel when thinking */
+.chat-input-panel.thinking {
+  animation: panel-pulse 2s ease-in-out infinite;
+}
+@keyframes panel-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.92; }
+}
+
+/* ─── Assistant message hover actions (Copy / 👍 / 👎) ─── */
+.msg-bubble-wrap-assistant {
+  position: relative;
+}
+.assistant-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.msg-bubble-wrap-assistant:hover .assistant-actions,
+.assistant-actions:focus-within {
+  opacity: 1;
+}
+.assistant-action-btn {
+  background: var(--aurix-surface-1);
+  border: 1px solid var(--aurix-border-subtle);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+  color: var(--aurix-text-secondary);
+  transition: all 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.assistant-action-btn:hover {
+  background: var(--aurix-surface-subtle);
+  color: var(--aurix-text-primary);
+  border-color: var(--aurix-accent-dim);
+}
+.assistant-action-btn.active.up   { color: var(--aurix-success); border-color: var(--aurix-success); }
+.assistant-action-btn.active.down { color: var(--aurix-error);   border-color: var(--aurix-error); }
+.assistant-action-btn.copied      { color: var(--aurix-success); }
+
+/* ─── Tool-call review bar (Accept all / Reject all) ─── */
+.tool-review-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--aurix-border-subtle);
+  background: var(--aurix-surface-2);
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--aurix-text-primary);
+}
+.tool-review-bar .pending-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+.tool-review-bar .pending-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--aurix-warning);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%      { transform: scale(1.4); opacity: 0.6; }
+}
+.tool-review-bar .spacer { flex: 1; }
+.tool-review-btn {
+  border: 1px solid var(--aurix-border-subtle);
+  background: var(--aurix-surface-1);
+  color: var(--aurix-text-primary);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tool-review-btn:hover { background: var(--aurix-surface-subtle); }
+.tool-review-btn.accept {
+  background: var(--vscode-button-background, var(--aurix-accent));
+  color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
+}
+.tool-review-btn.accept:hover {
+  background: var(--vscode-button-hoverBackground, var(--aurix-accent-dim));
+}
+.tool-review-btn.reject {
+  border-color: var(--aurix-error);
+  color: var(--aurix-error);
+}
+.tool-review-btn.reject:hover {
+  background: color-mix(in srgb, var(--aurix-error) 15%, transparent);
+}
+.tool-review-bar .kbd {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  padding: 1px 4px;
+  margin-left: 4px;
+  border-radius: 3px;
+  background: var(--aurix-surface-1);
+  border: 1px solid var(--aurix-border-subtle);
+  color: var(--aurix-text-secondary);
+}
+
+/* ─── Slash command dropdown (same chrome as MentionDropdown) ─── */
+.slash-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 8px;
+  margin-bottom: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--vscode-editorSuggestWidget-background, var(--aurix-surface-2));
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--aurix-border-subtle));
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  min-width: 280px;
+}
+.slash-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--vscode-editor-foreground);
+}
+.slash-item.active {
+  background: var(--vscode-list-activeSelectionBackground, var(--aurix-surface-subtle));
+  color: var(--vscode-list-activeSelectionForeground, var(--aurix-text-primary));
+}
+.slash-item .slash-icon { width: 16px; text-align: center; flex-shrink: 0; }
+.slash-item .slash-meta { display: flex; flex-direction: column; min-width: 0; }
+.slash-item .slash-cmd  { font-weight: 600; font-family: var(--vscode-editor-font-family, monospace); }
+.slash-item .slash-desc { font-size: 10.5px; color: var(--aurix-text-secondary); }
+
+/* ─── Token usage badge ─── */
+.token-usage-badge {
+  animation: fadeIn 0.2s ease-in;
+  margin: 2px 0;
+}
+.token-usage-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--aurix-surface-1);
+  border: 1px solid var(--aurix-border-subtle);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--aurix-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1.3;
+}
+.token-usage-summary:hover {
+  background: var(--aurix-surface-subtle);
+  border-color: var(--aurix-accent-dim);
+  color: var(--aurix-text-primary);
+}
+.token-usage-icon {
+  font-size: 12px;
+}
+.token-usage-total {
+  font-weight: 600;
+  color: var(--aurix-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.token-usage-sep {
+  opacity: 0.35;
+}
+.token-usage-detail {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+.token-usage-chevron {
+  font-size: 9px;
+  opacity: 0.5;
+  transition: transform 0.15s;
+}
+.token-usage-breakdown {
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: var(--aurix-surface-1);
+  border: 1px solid var(--aurix-border-subtle);
+  border-radius: 8px;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  animation: fadeIn 0.15s ease-in;
+}
+.token-usage-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1px 0;
+}
+.token-usage-label {
+  color: var(--aurix-text-secondary);
+}
+.token-usage-value {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--aurix-text-primary);
+}
+.token-usage-value.hit {
+  color: var(--aurix-success);
+}
+
+/* Proportion bar */
+.token-usage-bar-wrap {
+  display: flex;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 6px;
+  gap: 1px;
+}
+.token-usage-bar-input {
+  background: var(--aurix-accent);
+  border-radius: 2px 0 0 2px;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+.token-usage-bar-output {
+  background: var(--aurix-success);
+  border-radius: 0 2px 2px 0;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+.token-usage-bar-legend {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--aurix-text-secondary);
+}
+.token-usage-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.legend-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.legend-dot.input  { background: var(--aurix-accent); }
+.legend-dot.output { background: var(--aurix-success); }
