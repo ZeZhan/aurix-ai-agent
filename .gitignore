@@ -6,7 +6,6 @@ out/
 dist/
 build/
 *.tsbuildinfo
-*.vsix
 
 # Logs
 *.log
