@@ -64,6 +64,7 @@ console.log(`[package] Bundled uv ${expectedUvVersion}: ${uvSource}`);
 
 const requiredFiles = [
   path.join(extensionRoot, "out", "extension.js"),
+  path.join(extensionRoot, "out", "skills", "aurix-cross-vendor-migration", "SKILL.md"),
   path.join(extensionRoot, "server", "aurix-mcp-server-py", "src", "aurix_mcp_server", "__main__.py"),
   path.join(extensionRoot, "server", "aurix-mcp-server-py", "examples.index.json"),
   path.join(extensionRoot, "server", "aurix-mcp-server-py", "examples.manifest.json.gz"),

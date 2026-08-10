@@ -69,7 +69,7 @@ The Configurator generates skill files in `.github/skills/`. Copilot loads
 them on-demand when your request matches the skill's description.
 
 Built-in skills: `aurix-behaviour-workflow`, `aurix-code-migration`,
-`aurix-illd-lookup`.
+`aurix-cross-vendor-migration`, `aurix-illd-lookup`.
 
 You can add your own: create `.github/skills/<name>/SKILL.md` with YAML
 frontmatter (`name`, `description`) and Markdown instructions. Copilot

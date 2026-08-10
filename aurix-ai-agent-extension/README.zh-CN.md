@@ -69,7 +69,7 @@ Configurator 会在 `.github/skills/` 下生成 skill 文件。当你的请求�
 skill 的 description 匹配时，Copilot 会按需加载它。
 
 内置 skill：`aurix-behaviour-workflow`、`aurix-code-migration`、
-`aurix-illd-lookup`。
+`aurix-cross-vendor-migration`、`aurix-illd-lookup`。
 
 你也可以添加自己的：创建 `.github/skills/<name>/SKILL.md`，带上 YAML
 frontmatter（`name`、`description`）以及 Markdown 指令内容。Copilot 会自动

@@ -80,6 +80,7 @@ The agent ships with expert AURIX workflows. The open skill files live in [`skil
 |---|---|
 | [Behaviour Workflow](skills/aurix-behaviour-workflow/SKILL.md) | Implement hardware behaviour — blink LED, PWM, UART, SPI, ADC, timers, interrupts, DMA |
 | [Code Migration](skills/aurix-code-migration/SKILL.md) | Port code between AURIX devices and families (e.g. TC4D7 → TC334) |
+| [Cross-Vendor Migration](skills/aurix-cross-vendor-migration/SKILL.md) | Evaluate and functionally port NXP, ST, Renesas, or TI MCU demos to AURIX |
 | [iLLD Lookup](skills/aurix-illd-lookup/SKILL.md) | Search iLLD headers for API signatures, registers, and pin maps |
 
 ---
