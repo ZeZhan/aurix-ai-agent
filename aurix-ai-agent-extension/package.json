@@ -217,7 +217,8 @@
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc -p ./",
+    "build": "npm run clean && tsc -p ./ && npm run sync-skills",
+    "sync-skills": "node scripts/sync-skills.js",
     "watch": "tsc -watch -p ./",
     "package": "node .\\scripts\\package-vsix.js"
   },

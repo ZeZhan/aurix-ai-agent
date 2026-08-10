@@ -5,6 +5,10 @@
     "lib": [
       "ES2022"
     ],
+    "types": [
+      "node",
+      "vscode"
+    ],
     "outDir": "out",
     "rootDir": "src",
     "sourceMap": true,
