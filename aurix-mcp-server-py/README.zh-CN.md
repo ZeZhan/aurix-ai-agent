@@ -18,6 +18,22 @@ AURIX MCP 服务器，基于官方
 | `examples.search` | 搜索内置示例索引 |
 | `examples.import` | 将某个示例导入工作区 |
 | `examples.read_source` | 读取指定示例的源码 |
+| `documentation.search` | 按设备路由离线 AURIX 文档，并返回 PDF 物理页码引用 |
+
+## 文档索引
+
+文档抽取和建索引（包括所有 Docling 处理）只在线下执行，不属于 MCP
+服务器运行流程。服务器查询时只打开生成后的 SQLite 索引。VSIX 内置独立的
+TC2xx、TC3xx 和 TC4Dx 索引，并根据查询、`device`/`family` 或 Configurator
+所选板卡自动路由。PDF 不会进入 VSIX；独立 Python wheel 也不包含索引。
+
+独立运行服务器时可以配置索引目录，也可以用 `indexPath` 覆盖：
+
+```pwsh
+$env:AURIX_DOCUMENTATION_INDEX_DIR = "C:\path\to\documentation-indexes"
+# 兼容旧版的单索引覆盖：
+$env:AURIX_DOCUMENTATION_INDEX = "C:\path\to\aurix-documentation.sqlite"
+```
 
 ## 运行
 
@@ -63,6 +79,7 @@ src/aurix_mcp_server/
   __main__.py          CLI entry (stdio | doctor | version)
   server_fastmcp.py    FastMCP wiring (tool registration + instructions)
   context.py           .aurix-ai/context.json loader
+  documentation_retrieval.py  SQLite FTS 检索与物理页码引用
   utils.py             helpers (LimitedBuffer, path/address parsing)
   tooldef.py           ToolResult / ToolContext primitives
   tools/
@@ -73,6 +90,7 @@ src/aurix_mcp_server/
     illd_provision.py
     scan_project.py
     examples.py        examples.search / import / read_source
+    documentation_search.py  documentation.search MCP 业务逻辑
 tests/
   smoke_stdio.py       end-to-end stdio client test
 ```

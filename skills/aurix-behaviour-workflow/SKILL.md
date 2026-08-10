@@ -21,9 +21,15 @@ only when requested. Update each item as it starts and completes.
    pin, peripheral, baud rate, etc.). Implementation must cover all of them.
    Also identify which **subsystems** are involved (display, comms, sensing …).
 2. **Research in parallel.** In the first turn launch `examples.search`
-   + `#codebase` together. If needed, search iLLD headers directly (see
-   skill `aurix-illd-lookup`). Cap follow-up research at 2–3 additional
-   rounds; use `examples.read_source` only for the most relevant hit. For
+   + `#codebase` together. Also call `documentation.search` with the explicit
+   target `device` whenever implementation depends on hardware facts such as
+   peripheral availability, clock/timing limits, pin or board connectivity,
+   register behaviour, electrical constraints, or documented errata. Treat its
+   physical-page citations as factual evidence; if it abstains, do not guess.
+   Use examples and iLLD headers for implementation patterns and exact APIs (see
+   skill `aurix-illd-lookup`), not as substitutes for device documentation.
+   Cap follow-up research at 2–3 additional rounds; use
+   `examples.read_source` only for the most relevant hit. For
    each subsystem, **classify** the best-matching example as *full-reuse*,
    *partial-reuse*, or *reference-only* (see Hard rule 5 in
    copilot-instructions.md).
@@ -39,6 +45,8 @@ only when requested. Update each item as it starts and completes.
    only*, or equivalent, stop after a successful build and report the ELF.
    Otherwise run `flash.program` when hardware programming is part of the request.
 
-For factual questions (e.g. *max TOM frequency?*), answer in chat from
-`examples.*` or by searching iLLD headers directly — do **not** scaffold a
-project. If the request implies behaviour on hardware, treat it as a code task.
+For factual questions (e.g. *max TOM frequency?*), call
+`documentation.search` with the explicit device and answer from its cited
+evidence; use `examples.*` or iLLD headers only to supplement API details. Do
+**not** scaffold a project. If the request implies behaviour on hardware, treat
+it as a code task.

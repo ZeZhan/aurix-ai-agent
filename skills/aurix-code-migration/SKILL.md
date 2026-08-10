@@ -9,16 +9,21 @@ description: Migrate or port AURIX TriCore code between devices or families (e.g
    target device. Never overwrite the source project in-place — leftover
    SSW configs and build artifacts cause link errors. Copy only your
    application `.c`/`.h` into the new workspace.
-2. **Research API differences.** Search iLLD headers for both source and
-   target devices to confirm peripheral names and API signatures (see
-   skill `aurix-illd-lookup`). Do not guess — cross-family moves
-   (TC4x↔TC3x↔TC2x) rename entire modules and change function signatures.
-3. **Resolve pins.** Check iLLD PinMap headers for the **target** device
-   to find the correct LED / UART / peripheral pins on the target board.
-   Never assume pins are the same across boards.
+2. **Research device differences.** Call `documentation.search` separately for
+   the explicit source and target `device` to verify peripheral availability,
+   architectural differences, limits, register behaviour, board connectivity,
+   and relevant errata. Base migration claims on its physical-page citations;
+   if evidence is absent or the tool abstains, report the uncertainty and do not
+   guess. Then search iLLD headers for both devices to confirm peripheral names
+   and exact API signatures (see skill `aurix-illd-lookup`). Cross-family moves
+   (TC4x↔TC3x↔TC2x) can rename entire modules and change function signatures.
+3. **Resolve pins.** Use `documentation.search` for target-board schematics or
+   connectivity, then confirm the software symbol in the target iLLD PinMap
+   headers. Never assume pins are the same across devices or boards.
 4. **Global replace.** `grep_search` the workspace for every source-family
    API and fix **all files in one pass** (Cpu0–CpuN, all app files). Do not
    fix one file at a time.
 5. **Clean build.** Delete `build/` before the first target build.
-6. **Unsupported peripherals** — if the source uses a peripheral absent on
-   the target, stop and inform the user before proceeding.
+6. **Unsupported peripherals** — if cited target documentation shows that a
+   source peripheral is absent, stop and inform the user before proceeding. Do
+   not infer absence only because an example or iLLD symbol search had no hit.
