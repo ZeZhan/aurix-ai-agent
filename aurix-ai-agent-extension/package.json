@@ -3,7 +3,7 @@
   "displayName": "AURIX™ AI Agent",
   "description": "AURIX™-native Copilot agent — generate, build, and flash TriCore™ from a single chat prompt.",
   "icon": "media/aurix-ai-icon.png",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "publisher": "zehuazhang",
   "license": "Apache-2.0",
   "repository": {

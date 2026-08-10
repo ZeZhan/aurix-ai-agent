@@ -87,6 +87,8 @@ function buildCopilotInstructions(config: GeneratorConfig): string {
     "- `examples.search` / `examples.read_source` — find and read official iLLD examples.",
     "- `examples.import` — copy an example's sources only (NOT build-ready; use for",
     "  reference files inside an existing project).",
+    "- `documentation.search` — search bundled TC2xx/TC3xx/TC4Dx manuals with",
+    "  device-aware routing and physical PDF page citations.",
     "- `illd.provision` — install/refresh iLLD libraries into a project.",
     "- `project.scan` — inspect workspace sources/includes/.cproject.",
     "",

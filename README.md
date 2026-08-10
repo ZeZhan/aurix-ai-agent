@@ -67,6 +67,7 @@ Copilot calls these AURIX MCP tools automatically when relevant:
 | `build.run` | Build with the free GCC compiler (finds it on PATH for you) |
 | `flash.program` | Flash `.elf` / `.hex` to the board over USB with AURIX Flasher |
 | `examples.search` · `examples.import` · `examples.read_source` | Find, inspect, and import public iLLD code examples |
+| `documentation.search` | Search bundled TC2xx/TC3xx/TC4Dx documentation with device-aware routing and physical PDF page citations |
 | `illd.provision` | Install / update the public iLLD driver library |
 | `project.scan` | Look at the workspace structure |
 

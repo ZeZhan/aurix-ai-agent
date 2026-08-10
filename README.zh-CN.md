@@ -73,7 +73,8 @@ TC375，实现实时显示与一个小游戏 —— 全部由 AI agent 编写。
 - **[aurix-ai-agent-extension](aurix-ai-agent-extension/)** —— VS Code 扩展：Configurator UI、
   `copilot-instructions.md` + skill 文件生成器，以及 MCP server 自动注册。
 - **[aurix-mcp-server-py](aurix-mcp-server-py/)** —— Model Context Protocol 服务器（Python），
-  暴露 AURIX 工具：项目脚手架、iLLD 供给、构建、烧录、示例导入、设备上下文搜索。
+  暴露 AURIX 工具：项目脚手架、iLLD 供给、构建、烧录、示例导入，以及带 PDF
+  物理页码引用、按设备自动路由的 TC2xx/TC3xx/TC4Dx 离线文档检索。
 
 各软件包的安装与配置详情请参见其各自的 README。
 

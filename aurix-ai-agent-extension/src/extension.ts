@@ -21,6 +21,7 @@ import { ConfiguratorProvider } from "./configurator/ConfiguratorProvider";
 // is launched with `python -m aurix_mcp_server`. We bundle / locate the source
 // directory so PYTHONPATH can be set when the package is not pip-installed.
 const BUNDLED_PY_SERVER_DIR_RELATIVE = "server/aurix-mcp-server-py";
+const BUNDLED_DOCUMENTATION_DIR_RELATIVE = "server/aurix-mcp-server-py/data/documentation";
 const DEFAULT_PY_SERVER_DIR_RELATIVE = "aurix-mcp-server-py";
 const PY_MODULE = "aurix_mcp_server";
 
@@ -193,7 +194,9 @@ function registerAurixMcpProvider(context: vscode.ExtensionContext): void {
         event.affectsConfiguration("aurix-ai-agent.uvPython") ||
         event.affectsConfiguration("aurix-ai-agent.pythonPath") ||
         event.affectsConfiguration("aurix-ai-agent.pythonServerDir") ||
-        event.affectsConfiguration("aurix-ai-agent.buildToolchainPath")
+        event.affectsConfiguration("aurix-ai-agent.buildToolchainPath") ||
+        event.affectsConfiguration("aurix-ai-agent.selectedBoard") ||
+        event.affectsConfiguration("aurix-ai-agent.selectedDevice")
       ) {
         if (
           event.affectsConfiguration("aurix-ai-agent.uvPath") ||
@@ -256,6 +259,18 @@ function resolveMcpLaunchSpec(folder: vscode.WorkspaceFolder): {
   if (idePath) {
     baseEnv.AURIX_ADS_STUDIO_PATH = idePath;
     baseEnv.AURIX_IDE_PATH = idePath;
+  }
+  const selectedDevice = (
+    cfg.get<string>("selectedBoard", "") || cfg.get<string>("selectedDevice", "")
+  ).trim();
+  if (selectedDevice) {
+    baseEnv.AURIX_SELECTED_DEVICE = selectedDevice;
+  }
+  if (extensionInstallPath) {
+    const documentationDir = path.join(extensionInstallPath, BUNDLED_DOCUMENTATION_DIR_RELATIVE);
+    if (fs.existsSync(documentationDir)) {
+      baseEnv.AURIX_DOCUMENTATION_INDEX_DIR = documentationDir;
+    }
   }
 
   const runtime = (cfg.get<string>("mcpRuntime", "auto") || "auto").toLowerCase();

@@ -606,6 +606,10 @@ export class ConfiguratorProvider implements vscode.WebviewViewProvider {
             <span class="tool-desc">Import example into workspace</span>
           </div>
           <div class="tool-item">
+            <span class="tool-name">documentation.search</span>
+            <span class="tool-desc">Search bundled TC2xx/TC3xx/TC4Dx documentation</span>
+          </div>
+          <div class="tool-item">
             <span class="tool-name">illd.provision</span>
             <span class="tool-desc">Install/refresh iLLD libraries</span>
           </div>

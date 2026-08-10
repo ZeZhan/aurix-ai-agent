@@ -36,8 +36,41 @@ async def main() -> int:
             assert {
                 "ads.create_project", "build.run", "examples.import",
                 "examples.read_source", "examples.search", "flash.program",
-                "illd.provision", "project.scan",
+                "documentation.search", "illd.provision", "project.scan",
             } <= set(names)
+
+            documentation_tool = next(
+                tool for tool in tools.tools if tool.name == "documentation.search"
+            )
+            documentation_properties = documentation_tool.inputSchema["properties"]
+            assert {"query", "topK", "indexPath", "device", "family"} <= set(
+                documentation_properties
+            )
+
+            if os.environ.get("AURIX_DOCUMENTATION_INDEX_DIR"):
+                documentation = await session.call_tool(
+                    "documentation.search",
+                    {"query": "TC397 BD-step errata", "topK": 1},
+                )
+                assert documentation.isError is False
+                assert documentation.structuredContent
+                assert documentation.structuredContent["family"] == "tc3xx"
+                results = documentation.structuredContent["results"]
+                assert results and results[0]["document_id"] == "tc39x-bd-errata"
+                print("documentation.search routed OK:", results[0]["chunk_id"])
+            elif os.environ.get("AURIX_DOCUMENTATION_INDEX"):
+                documentation = await session.call_tool(
+                    "documentation.search",
+                    {
+                        "query": "CPU_TC.H026 spurious lockstep error DSPR MBIST",
+                        "topK": 1,
+                    },
+                )
+                assert documentation.isError is False
+                assert documentation.structuredContent
+                results = documentation.structuredContent["results"]
+                assert results and results[0]["citation"]["pdf_pages"] == [92]
+                print("documentation.search OK:", results[0]["chunk_id"])
 
             # project.scan on this repo's python source dir → structured content
             res = await session.call_tool("project.scan", {"projectPath": SRC})

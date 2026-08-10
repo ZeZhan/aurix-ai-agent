@@ -6,6 +6,7 @@ out/
 dist/
 build/
 *.tsbuildinfo
+/documentation/
 
 # Logs
 *.log

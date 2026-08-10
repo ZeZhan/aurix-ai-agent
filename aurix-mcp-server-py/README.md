@@ -18,6 +18,24 @@ The MCP server for Infineon AURIX™ microcontrollers, built on the official
 | `examples.search` | Search the bundled example index |
 | `examples.import` | Import an example into the workspace |
 | `examples.read_source` | Read source of a specific example |
+| `documentation.search` | Search offline AURIX documentation with device-aware routing and physical PDF page citations |
+
+## Documentation index
+
+Documentation extraction and indexing, including any Docling processing, run
+offline and outside the MCP server. The server only opens the resulting SQLite
+index at query time. The VSIX bundles separate TC2xx, TC3xx, and TC4Dx indexes
+and selects one from the query, `device`/`family`, or the Configurator board.
+PDFs are never bundled. The standalone Python wheel does not include the indexes.
+
+For a standalone server, configure an index directory or pass `indexPath` as an
+override:
+
+```pwsh
+$env:AURIX_DOCUMENTATION_INDEX_DIR = "C:\path\to\documentation-indexes"
+# Legacy single-index override:
+$env:AURIX_DOCUMENTATION_INDEX = "C:\path\to\aurix-documentation.sqlite"
+```
 
 ## Run
 
@@ -64,6 +82,7 @@ src/aurix_mcp_server/
   __main__.py          CLI entry (stdio | doctor | version)
   server_fastmcp.py    FastMCP wiring (tool registration + instructions)
   context.py           .aurix-ai/context.json loader
+  documentation_retrieval.py  SQLite FTS retrieval + physical-page citations
   utils.py             helpers (LimitedBuffer, path/address parsing)
   tooldef.py           ToolResult / ToolContext primitives
   tools/
@@ -74,6 +93,7 @@ src/aurix_mcp_server/
     illd_provision.py
     scan_project.py
     examples.py        examples.search / import / read_source
+    documentation_search.py  documentation.search MCP business logic
 tests/
   smoke_stdio.py       end-to-end stdio client test
 ```

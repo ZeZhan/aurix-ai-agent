@@ -26,6 +26,7 @@ from . import SERVER_NAME, SERVER_VERSION
 from .tooldef import RiskLevel, ToolContext, ToolResult
 from .tools.ads_create_project import _run as ads_create_project_run
 from .tools.build_run import _run as build_run_run
+from .tools.documentation_search import _run as documentation_search_run
 from .tools.examples import _import_run, _read_source_run, _search_run
 from .tools.flash_program import _run as flash_program_run
 from .tools.illd_provision import _run as illd_provision_run
@@ -299,6 +300,35 @@ async def examples_search(
         keyword=keyword, limit=limit, indexPath=indexPath,
     )
     return _to_call_result(await _search_run(args, _tool_context(None)))
+
+
+@mcp.tool(
+    name="documentation.search",
+    description=(
+        "Search the generation-appropriate offline AURIX documentation SQLite index. "
+        "Returns evidence excerpts with document metadata and physical PDF page citations. "
+        "Specify device/family when the query does not identify the target."
+    ),
+    annotations=_ann("read"),
+)
+async def documentation_search(
+    query: str,
+    topK: int | None = None,
+    indexPath: str | None = None,
+    device: str | None = None,
+    family: str | None = None,
+) -> CallToolResult:
+    """Search indexed AURIX documentation with physical-page citations.
+
+    Args:
+        query: Technical question or search terms.
+        topK: Maximum results to return. Values above 10 are clamped to 10.
+        indexPath: Path to the offline SQLite index. Overrides AURIX_DOCUMENTATION_INDEX.
+        device: Target device or board, for example TC375 or KIT_A2G_TC375_LITE.
+        family: Target generation, for example TC2xx, TC3xx, or TC4Dx.
+    """
+    args = _clean(query=query, topK=topK, indexPath=indexPath, device=device, family=family)
+    return _to_call_result(await documentation_search_run(args, _tool_context(None)))
 
 
 @mcp.tool(
