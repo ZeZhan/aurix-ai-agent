@@ -5,6 +5,13 @@ description: Implement a hardware behaviour on AURIX (blink LED, configure PWM, 
 
 # Workflow for behaviour requests (e.g. *blink LED*, *configure PWM*)
 
+**Route cross-vendor migrations first.** If the source project or example targets
+a third-party MCU or SDK (for example NXP, ST, Renesas, or TI) and the requested
+target is AURIX, read and follow the `aurix-cross-vendor-migration` skill instead
+of treating the task as a normal AURIX behaviour implementation. That skill owns
+feasibility grading, functional re-implementation, provenance, approval gates,
+and the migration evidence ledger.
+
 **Keep the work visible.** Before the first MCP call in a multi-step coding
 task, use the available task-list/Todo tool to create a visible checklist.
 Include research, setup/import, application edit, and build; include flash
