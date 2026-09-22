@@ -14,6 +14,7 @@ import re
 from typing import Any, Optional
 
 from ..context import load_workspace_context, context_get
+from ..illd_version import VERSION_HEADER, detect_illd_version, format_illd_version
 from ..tooldef import ToolContext, ToolResult
 from ..utils import safe_error_message
 
@@ -40,6 +41,7 @@ def _scan_directory(
     linker_scripts: list[str],
     max_files: int,
     counter: list[int],
+    version_headers: list[str],
 ) -> None:
     if counter[0] >= max_files:
         return
@@ -72,7 +74,7 @@ def _scan_directory(
                 continue
             _scan_directory(
                 root_dir, entry.path, exclude_set, c_sources, asm_sources,
-                header_dirs, linker_scripts, max_files, counter,
+                header_dirs, linker_scripts, max_files, counter, version_headers,
             )
         elif entry.is_file():
             ext = os.path.splitext(entry.name)[1].lower()
@@ -87,6 +89,8 @@ def _scan_directory(
             elif ext in HEADER_EXTENSIONS:
                 header_dirs.add(rel_dir or ".")
                 counter[0] += 1
+                if entry.name == VERSION_HEADER:
+                    version_headers.append(rel_file)
             elif ext in LINKER_EXTENSIONS:
                 linker_scripts.append(rel_file)
                 counter[0] += 1
@@ -148,10 +152,11 @@ def _scan_project(project_path: str, exclude_dirs: list[str], max_files: int) ->
     header_dirs: set[str] = set()
     linker_scripts: list[str] = []
     counter = [0]
+    version_headers: list[str] = []
 
     _scan_directory(
         project_path, project_path, exclude_set, c_sources, asm_sources,
-        header_dirs, linker_scripts, max_files, counter,
+        header_dirs, linker_scripts, max_files, counter, version_headers,
     )
 
     c_sources.sort()
@@ -169,6 +174,9 @@ def _scan_project(project_path: str, exclude_dirs: list[str], max_files: int) ->
         "linkerScripts": linker_scripts,
         "detectedDevice": device,
         "detectedIlldDir": illd_dir,
+        "illdVersion": detect_illd_version(
+            project_path, version_headers, scan_complete=counter[0] < max_files,
+        ),
         "excludedDirs": exclude_dirs,
         "stats": {
             "totalCFiles": len(c_sources),
@@ -205,6 +213,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         ]
         if result["detectedDevice"]:
             lines.append(f"Detected device: {result['detectedDevice']} (iLLD dir: {result['detectedIlldDir']})")
+        lines.append(format_illd_version(result["illdVersion"]))
         if result["excludedDirs"]:
             lines.append(f"Excluded: {', '.join(result['excludedDirs'])}")
         if result["linkerScripts"]:

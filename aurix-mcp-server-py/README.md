@@ -20,6 +20,23 @@ The MCP server for Infineon AURIX™ microcontrollers, built on the official
 | `examples.read_source` | Read source of a specific example |
 | `documentation.search` | Search offline AURIX documentation with device-aware routing and physical PDF page citations |
 
+## iLLD version reporting
+
+`ads.create_project` and `project.scan` include a short iLLD version summary and
+an `illdVersion` object (`status`, `version`, `sources`) in their existing results.
+Sources are project-relative paths to `IfxLldVersion.h`. The detector reads
+`IFX_LLD_VERSION_MAJOR`, `MINOR`, and `REVISION` (TC2xx/TC3xx) or `PATCH` (TC4xx).
+It uses the final deployed libraries, including preserved workspace dependencies,
+or the actual cached libraries when no workspace is requested. It does not infer
+the release from the installed IDE or initializer version.
+
+Missing, unreadable, or unsupported declarations report `unknown`; different
+declared releases report `conflict`. Scanning respects `excludeDirs` and
+`maxFiles`; reaching the file limit prevents a definitive single-version result.
+This is local declaration reporting, not a compiler include-resolution check,
+file-integrity guarantee, or latest-release check. No extra tool call, network
+request, or version upgrade is performed.
+
 ## Documentation index
 
 Documentation extraction and indexing, including any Docling processing, run
@@ -71,6 +88,7 @@ aurix-mcp-server --doctor
 ## Test
 
 ```pwsh
+python -m unittest discover -s tests -p "test_*.py"
 python tests/smoke_stdio.py
 ```
 

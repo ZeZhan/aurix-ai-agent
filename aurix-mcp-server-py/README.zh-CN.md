@@ -20,6 +20,20 @@ AURIX MCP 服务器，基于官方
 | `examples.read_source` | 读取指定示例的源码 |
 | `documentation.search` | 按设备路由离线 AURIX 文档，并返回 PDF 物理页码引用 |
 
+## iLLD 版本提示
+
+`ads.create_project` 和 `project.scan` 会在现有结果中附带简短的 iLLD
+版本提示及 `illdVersion` 对象（`status`、`version`、`sources`）。依据为
+项目内 `IfxLldVersion.h` 的相对路径，解析 `IFX_LLD_VERSION_MAJOR`、
+`MINOR` 及 `REVISION`（TC2xx/TC3xx）或 `PATCH`（TC4xx）宏。
+创建项目时读取最终部署的库，包括被保留的工作区依赖；未指定工作区时读取
+实际缓存中的库，不根据当前 IDE 或 initializer 的版本推断。
+
+声明缺失、不可读或格式不受支持时报告 `unknown`，不同声明版本并存时报告
+`conflict`。扫描遵守 `excludeDirs` 和 `maxFiles`，达到文件上限时不作确定的
+单一版本结论。这是本地版本声明提示，不验证编译器的实际包含路径、文件完整性
+或是否为最新版本，不增加工具调用、网络请求，也不执行版本升级。
+
 ## 文档索引
 
 文档抽取和建索引（包括所有 Docling 处理）只在线下执行，不属于 MCP
@@ -68,6 +82,7 @@ aurix-mcp-server --doctor
 ## 测试
 
 ```pwsh
+python -m unittest discover -s tests -p "test_*.py"
 python tests/smoke_stdio.py
 ```
 
