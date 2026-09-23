@@ -21,15 +21,22 @@ def _read_version(header: Path) -> Optional[str]:
         text,
         flags=re.MULTILINE,
     )
-    declarations = [(name, value.strip()) for name, value in declarations if name != "H"]
+    names = {name for name, _ in declarations}
+    if {"PATCH", "REVISION"} <= names:
+        return None
+    if {"GENERATION", "MAJOR_UPDATE"} & names:
+        parts = ("GENERATION", "MAJOR", "MAJOR_UPDATE", "MINOR", "REVISION")
+    else:
+        parts = ("MAJOR", "MINOR", "PATCH" if "PATCH" in names else "REVISION")
     values: dict[str, str] = {}
     for name, value in declarations:
-        literal = re.fullmatch(r"(?:(\d+)[uUlL]*|\([ \t]*(\d+)[uUlL]*[ \t]*\))", value)
-        if literal is None:
+        if name not in parts:
+            continue
+        literal = re.fullmatch(r"(?:(\d+)[uUlL]*|\([ \t]*(\d+)[uUlL]*[ \t]*\))", value.strip())
+        if literal is None or name in values:
             return None
         values[name] = str(int(literal.group(1) or literal.group(2)))
-    parts = ("MAJOR", "MINOR", "PATCH" if "PATCH" in values else "REVISION")
-    if len(declarations) != len(parts) or set(values) != set(parts):
+    if set(values) != set(parts):
         return None
     return ".".join(values[part] for part in parts)
 

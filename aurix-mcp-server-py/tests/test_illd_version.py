@@ -17,12 +17,19 @@ from aurix_mcp_server.tooldef import ToolContext, ToolResult
 from aurix_mcp_server.tools import ads_create_project, scan_project
 
 
-def write_version(root: Path, version: tuple[int, int, int], device: str = "TC3xx") -> Path:
+def write_version(
+    root: Path, version: tuple[int, int, int] | tuple[int, int, int, int, int],
+    device: str = "TC3xx",
+) -> Path:
     header = root / "Libraries" / "iLLD" / device / "Tricore" / "IfxLldVersion.h"
     header.parent.mkdir(parents=True, exist_ok=True)
+    parts = (
+        ("GENERATION", "MAJOR", "MAJOR_UPDATE", "MINOR", "REVISION")
+        if len(version) == 5 else ("MAJOR", "MINOR", "REVISION")
+    )
     header.write_text("\n".join(
         f"#define IFX_LLD_VERSION_{part} {value}"
-        for part, value in zip(("MAJOR", "MINOR", "REVISION"), version)
+        for part, value in zip(parts, version)
     ) + "\n", encoding="utf-8")
     return header
 
@@ -73,10 +80,41 @@ class IlldVersionTests(unittest.TestCase):
             self.assertEqual(result["version"], "2.4.0")
             self.assertEqual(result["sources"][0]["path"], "Libraries/IfxLldVersion.h")
 
-    def test_unverified_or_ambiguous_macro_formats_remain_unknown(self) -> None:
+    def test_five_part_release_preserves_generation_and_major_update(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            header = write_version(Path(temp_dir), (1, 0, 1, 17, 0), "TC37A")
+            result = detect_illd_version(temp_dir)
+
+            self.assertEqual(result, {
+                "status": "detected",
+                "version": "1.0.1.17.0",
+                "sources": [{
+                    "path": header.relative_to(temp_dir).as_posix(),
+                    "version": "1.0.1.17.0",
+                }],
+            })
+            self.assertIn("iLLD version: 1.0.1.17.0", format_illd_version(result))
+
+    def test_extra_metadata_does_not_invalidate_supported_releases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for version in ((1, 20, 0), (1, 0, 1, 17, 0)):
+                with self.subTest(version=version):
+                    header = write_version(Path(temp_dir), version)
+                    header.write_text(
+                        header.read_text(encoding="utf-8")
+                        + '#define IFX_LLD_VERSION_BUILD 1\n'
+                        + '#define IFX_LLD_VERSION_STRING "release metadata"\n',
+                        encoding="utf-8",
+                    )
+                    result = detect_illd_version(temp_dir)
+                    self.assertEqual(result["status"], "detected")
+                    self.assertEqual(result["version"], ".".join(map(str, version)))
+
+    def test_incomplete_extended_or_ambiguous_macros_remain_unknown(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             for extra in (
-                "#define IFX_LLD_VERSION_BUILD 1\n",
+                "#define IFX_LLD_VERSION_GENERATION 1\n",
+                "#define IFX_LLD_VERSION_MAJOR_UPDATE 1\n",
                 "#define IFX_LLD_VERSION_MAJOR 2\n",
                 "#define IFX_LLD_VERSION_PATCH 0\n",
             ):
@@ -84,6 +122,23 @@ class IlldVersionTests(unittest.TestCase):
                     header = write_version(Path(temp_dir), (1, 20, 0))
                     header.write_text(header.read_text(encoding="utf-8") + extra, encoding="utf-8")
                     self.assertEqual(detect_illd_version(temp_dir)["status"], "unknown")
+
+    def test_five_part_release_requires_unique_numeric_components(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for part in ("GENERATION", "MAJOR", "MAJOR_UPDATE", "MINOR", "REVISION"):
+                for defect in ("missing", "duplicate", "nonnumeric"):
+                    with self.subTest(part=part, defect=defect):
+                        header = write_version(Path(temp_dir), (1, 0, 1, 17, 0))
+                        lines = header.read_text(encoding="utf-8").splitlines(keepends=True)
+                        declaration = next(line for line in lines if line.split()[1] == f"IFX_LLD_VERSION_{part}")
+                        if defect == "missing":
+                            lines.remove(declaration)
+                        elif defect == "duplicate":
+                            lines.append(declaration)
+                        else:
+                            lines[lines.index(declaration)] = f"#define IFX_LLD_VERSION_{part} UNKNOWN\n"
+                        header.write_text("".join(lines), encoding="utf-8")
+                        self.assertEqual(detect_illd_version(temp_dir)["status"], "unknown")
 
     def test_commented_defines_do_not_count_as_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -128,6 +183,27 @@ class IlldVersionTests(unittest.TestCase):
 
 
 class ProjectVersionReportingTests(unittest.TestCase):
+    def test_five_part_release_is_reported_by_create_and_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as workspace_dir:
+            write_version(Path(cache_dir), (1, 0, 1, 17, 0), "TC37A")
+            cached = run_create(Path(cache_dir))
+            deployed = run_create(Path(cache_dir), Path(workspace_dir))
+            scanned = asyncio.run(scan_project._run(
+                {"projectPath": workspace_dir}, ToolContext(send_progress=AsyncMock()),
+            ))
+
+            for label, result in (("cache", cached), ("deployed", deployed), ("scan", scanned)):
+                with self.subTest(result=label):
+                    self.assertFalse(result.is_error, result.content[0].text)
+                    report = result.structured_content
+                    if label == "scan":
+                        report = report["scan"]
+                    version = report["illdVersion"]
+                    self.assertEqual(version["status"], "detected")
+                    self.assertEqual(version["version"], "1.0.1.17.0")
+                    self.assertEqual(version["sources"][0]["version"], "1.0.1.17.0")
+                    self.assertIn("iLLD version: 1.0.1.17.0", result.content[0].text)
+
     def test_create_without_workspace_reports_cached_library(self) -> None:
         with tempfile.TemporaryDirectory() as cache_dir:
             cache = Path(cache_dir)
@@ -146,7 +222,7 @@ class ProjectVersionReportingTests(unittest.TestCase):
             cache = Path(cache_dir)
             workspace = Path(workspace_dir)
             write_version(cache, (1, 21, 0))
-            header = write_version(workspace, (1, 20, 0))
+            header = write_version(workspace, (1, 0, 1, 17, 0))
             original = header.read_bytes()
             (workspace / "Configurations").mkdir()
             (workspace / "Configurations" / "Ifx_Cfg.h").touch()
@@ -154,9 +230,9 @@ class ProjectVersionReportingTests(unittest.TestCase):
             result = run_create(cache, workspace)
 
             self.assertFalse(result.is_error, result.content[0].text)
-            self.assertEqual(result.structured_content["illdVersion"]["version"], "1.20.0")
+            self.assertEqual(result.structured_content["illdVersion"]["version"], "1.0.1.17.0")
             self.assertEqual(header.read_bytes(), original)
-            self.assertIn("iLLD version: 1.20.0", result.content[0].text)
+            self.assertIn("iLLD version: 1.0.1.17.0", result.content[0].text)
 
     def test_create_reports_library_after_deployment(self) -> None:
         with tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as workspace_dir:
