@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from ..context import load_workspace_context
+from ..illd_version import detect_illd_version, format_illd_version
 from ..tooldef import TextContent, ToolContext, ToolResult
 
 # ---------------------------------------------------------------------------
@@ -989,10 +990,12 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
                         deploy_details.append(f"Preserved existing {f}")
 
         target_path = deployed_to or cache_path
+        illd_version = detect_illd_version(target_path)
         lines = [
             f"ads.create_project succeeded for {upper_device}:",
             f"  {'Deployed to' if deployed_to else 'Cache path'}: {target_path}",
             f"  iLLD directory: {info.illd_dir}",
+            f"  {format_illd_version(illd_version)}",
             f"  Family: {info.family}",
             f"  Cores: {info.cores}",
             *[f"  {d}" for d in details],
@@ -1009,6 +1012,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
                 "deployedTo": deployed_to,
                 "cachePath": cache_path,
                 "illdDir": info.illd_dir,
+                "illdVersion": illd_version,
                 "family": info.family,
                 "cores": info.cores,
             },

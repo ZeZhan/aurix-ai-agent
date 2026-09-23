@@ -20,6 +20,11 @@ AURIX MCP 服务器，基于官方
 | `examples.read_source` | 读取指定示例的源码 |
 | `documentation.search` | 按设备路由离线 AURIX 文档，并返回 PDF 物理页码引用 |
 
+## iLLD 版本提示
+
+`ads.create_project` 和 `project.scan` 会提示本地库头文件中声明的 iLLD 版本。
+无法识别或存在冲突时分别标记为 `unknown` 或 `conflict`，不检查更新或执行升级。
+
 ## 文档索引
 
 文档抽取和建索引（包括所有 Docling 处理）只在线下执行，不属于 MCP
@@ -68,6 +73,7 @@ aurix-mcp-server --doctor
 ## 测试
 
 ```pwsh
+python -m unittest discover -s tests -p "test_*.py"
 python tests/smoke_stdio.py
 ```
 

@@ -20,6 +20,12 @@ The MCP server for Infineon AURIX™ microcontrollers, built on the official
 | `examples.read_source` | Read source of a specific example |
 | `documentation.search` | Search offline AURIX documentation with device-aware routing and physical PDF page citations |
 
+## iLLD version reporting
+
+`ads.create_project` and `project.scan` report the iLLD version declared in local
+library headers. Unrecognized or conflicting versions are marked `unknown` or
+`conflict`. No update checks or upgrades are performed.
+
 ## Documentation index
 
 Documentation extraction and indexing, including any Docling processing, run
@@ -71,6 +77,7 @@ aurix-mcp-server --doctor
 ## Test
 
 ```pwsh
+python -m unittest discover -s tests -p "test_*.py"
 python tests/smoke_stdio.py
 ```
 
