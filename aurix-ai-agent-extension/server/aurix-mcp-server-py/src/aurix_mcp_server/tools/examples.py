@@ -756,7 +756,11 @@ async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResul
             "filesRead": success_count,
             "totalFiles": len(results),
             "totalChars": total_chars,
-            "files": [{"file": r["file"], "chars": len(r["content"]), **({"error": r["error"]} if "error" in r else {})} for r in results],
+            "files": [
+                {"file": result["file"], "chars": len(result["content"]), "content": result["content"],
+                 **({"error": result["error"]} if "error" in result else {})}
+                for result in results
+            ],
         },
     )
 

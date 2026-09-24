@@ -20,6 +20,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from ..board_pins import deploy_board_pins, format_board_pins, normalize_board, resolve_board_pins, selected_board
 from ..context import load_workspace_context
 from ..illd_version import detect_illd_version, format_illd_version
 from ..tooldef import TextContent, ToolContext, ToolResult
@@ -953,7 +954,16 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         )
 
     try:
-        studio_dir = resolve_studio_dir()
+        board = selected_board(args.get("board"), workspace, device)
+        if device.upper().startswith("KIT_") and board and normalize_board(device) != board:
+            return ToolResult.text("ads.create_project failed: device and board specify different boards", is_error=True)
+        requested_device = re.search(r"TC(?:\d{3}|4[A-Z]\d)", device.upper())
+        board_device = re.search(r"TC(?:\d{3}|4[A-Z]\d)", board or "")
+        if board_device and requested_device and board_device[0] != requested_device[0]:
+            return ToolResult.text("ads.create_project failed: board and device refer to different devices", is_error=True)
+        studio_dir = resolve_studio_dir(workspace)
+    except ValueError as error:
+        return ToolResult.text(f"ads.create_project failed: {error}", is_error=True)
     except FileNotFoundError as e:
         return ToolResult(
             content=[TextContent(text=f"Cannot resolve ADS installation: {e}")],
@@ -991,11 +1001,17 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 
         target_path = deployed_to or cache_path
         illd_version = detect_illd_version(target_path)
+        if deployed_to:
+            board_pins = deploy_board_pins(deployed_to, board, studio_dir)
+        else:
+            board_pins = resolve_board_pins(None, board, studio_dir)
+            board_pins["deployment"] = "not_copied"
         lines = [
             f"ads.create_project succeeded for {upper_device}:",
             f"  {'Deployed to' if deployed_to else 'Cache path'}: {target_path}",
             f"  iLLD directory: {info.illd_dir}",
             f"  {format_illd_version(illd_version)}",
+            f"  {format_board_pins(board_pins)}",
             f"  Family: {info.family}",
             f"  Cores: {info.cores}",
             *[f"  {d}" for d in details],
@@ -1013,6 +1029,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
                 "cachePath": cache_path,
                 "illdDir": info.illd_dir,
                 "illdVersion": illd_version,
+                "boardPins": board_pins,
                 "family": info.family,
                 "cores": info.cores,
             },

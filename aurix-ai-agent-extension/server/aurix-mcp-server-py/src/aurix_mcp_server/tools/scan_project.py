@@ -13,6 +13,7 @@ import os
 import re
 from typing import Any, Optional
 
+from ..board_pins import format_board_pins, resolve_board_pins, selected_board
 from ..context import load_workspace_context, context_get
 from ..illd_version import VERSION_HEADER, detect_illd_version, format_illd_version
 from ..tooldef import ToolContext, ToolResult
@@ -140,7 +141,9 @@ def _detect_device(c_sources: list[str], include_dirs: list[str]) -> tuple[str, 
     return device, best_dir
 
 
-def _scan_project(project_path: str, exclude_dirs: list[str], max_files: int) -> dict[str, Any]:
+def _scan_project(
+    project_path: str, exclude_dirs: list[str], max_files: int, board: str | None = None,
+) -> dict[str, Any]:
     if not os.path.isdir(project_path):
         raise ValueError(f"Project path does not exist or is not a directory: {project_path}")
 
@@ -174,6 +177,7 @@ def _scan_project(project_path: str, exclude_dirs: list[str], max_files: int) ->
         "linkerScripts": linker_scripts,
         "detectedDevice": device,
         "detectedIlldDir": illd_dir,
+        "boardPins": resolve_board_pins(project_path, board),
         "illdVersion": detect_illd_version(
             project_path, version_headers, scan_complete=counter[0] < max_files,
         ),
@@ -204,7 +208,8 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         exclude_dirs = [str(d) for d in args.get("excludeDirs", [])] if isinstance(args.get("excludeDirs"), list) else []
         max_files = int(args.get("maxFiles") or DEFAULT_MAX_FILES)
 
-        result = _scan_project(project_path, exclude_dirs, max_files)
+        board = selected_board(args.get("board"), project_path)
+        result = _scan_project(project_path, exclude_dirs, max_files, board)
 
         stats = result["stats"]
         lines = [
@@ -214,6 +219,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         if result["detectedDevice"]:
             lines.append(f"Detected device: {result['detectedDevice']} (iLLD dir: {result['detectedIlldDir']})")
         lines.append(format_illd_version(result["illdVersion"]))
+        lines.append(format_board_pins(result["boardPins"]))
         if result["excludedDirs"]:
             lines.append(f"Excluded: {', '.join(result['excludedDirs'])}")
         if result["linkerScripts"]:

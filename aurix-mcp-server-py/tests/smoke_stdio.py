@@ -6,6 +6,8 @@ Run:  python tests/smoke_stdio.py
 import asyncio
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -43,9 +45,86 @@ async def main() -> int:
                 tool for tool in tools.tools if tool.name == "documentation.search"
             )
             documentation_properties = documentation_tool.inputSchema["properties"]
-            assert {"query", "topK", "indexPath", "device", "family"} <= set(
+            assert {"query", "topK", "indexPath", "device", "family", "board", "hardwareVersion", "projectPath"} <= set(
                 documentation_properties
             )
+            for name in ("ads.create_project", "project.scan"):
+                tool = next(tool for tool in tools.tools if tool.name == name)
+                assert "board" in tool.inputSchema["properties"]
+
+            with tempfile.TemporaryDirectory() as project:
+                bpl = Path(project) / "board_pin_label.bpl"
+                bpl.write_text("// AURIX TC375 LITE KIT\n16, P0.5/LED1\n", encoding="utf-8")
+                original = bpl.read_bytes()
+                pins_result = await session.call_tool("project.scan", {
+                    "projectPath": project, "board": "KIT_A2G_TC375_LITE",
+                })
+                assert pins_result.isError is False
+                pins = pins_result.structuredContent["scan"]["boardPins"]
+                assert pins["status"] == "detected"
+                assert pins["pins"][0]["pin"] == "P00.5"
+                assert pins["pins"][0]["aliases"] == ["LED1"]
+                assert pins["pins"][0]["line"] == 2
+                assert pins["source"]["kind"] == "project"
+                assert pins["hardwareVersion"] is None
+                assert pins["electricalProperties"] == "not_provided"
+                assert bpl.read_bytes() == original
+                print("project.scan BPL evidence OK:", pins["board"])
+
+                evidence = await session.call_tool("documentation.search", {
+                    "query": "LED1 pin and active level", "board": "KIT_A2G_TC375_LITE",
+                    "hardwareVersion": "V2", "projectPath": project,
+                })
+                assert not evidence.isError
+                item = evidence.structuredContent["results"][0]
+                assert item["facts"][0]["pin"] == pins["pins"][0]["pin"]
+                assert item["facts"][0]["active_level"] == "low"
+                assert item["citation"]["pdf_pages"] == [10]
+                assert item["bplCheck"] == "matched" and item["usableForCodeGeneration"]
+                assert bpl.read_bytes() == original
+                print("documentation.search BPL + pin/polarity/citation OK")
+
+            for query in ("TC375 Lite V2 LED button", "TC375 Lite V2 LED\u548c\u6309\u94ae\u6709\u6548\u7535\u5e73"):
+                evidence = await session.call_tool("documentation.search", {"query": query})
+                assert not evidence.isError
+                assert evidence.structuredContent["resultCount"] == 3
+                assert not evidence.structuredContent["requiresConfirmation"]
+            for arguments in (
+                {"query": "LED1", "board": "KIT_A2G_TC375_LITE", "hardwareVersion": "V1"},
+                {"query": "LED1", "board": "KIT_A2G_TC375_ARD_SB", "hardwareVersion": "V2"},
+            ):
+                evidence = await session.call_tool("documentation.search", arguments)
+                assert not evidence.isError and evidence.structuredContent["abstained"]
+            print("documentation.search board/revision/language checks OK")
+
+            with tempfile.TemporaryDirectory() as project:
+                bpl = Path(project) / "board_pin_label.bpl"
+                bpl.write_text("// KIT_A3G_TC4D7_LITE V2.x\nF5, P3.9/LED1\nF4, P3.10/LED2\nG5, P3.11/BUTTON1\n", encoding="utf-8")
+                original = bpl.read_bytes()
+                evidence = await session.call_tool("documentation.search", {
+                    "query": "TC4D7 Lite LED\u548c\u6309\u94ae", "hardwareVersion": "V2.0", "projectPath": project,
+                })
+                assert not evidence.isError
+                assert evidence.structuredContent["resultCount"] == 3
+                for item in evidence.structuredContent["results"]:
+                    assert item["bplCheck"] == "matched" and item["usableForCodeGeneration"]
+                    assert item["citation"]["pdf_pages"] == [9]
+                assert bpl.read_bytes() == original
+
+            evidence = await session.call_tool("documentation.search", {
+                "query": "TC397 5V TFT V2.0 LED\u548c\u6309\u94ae", "topK": 10,
+            })
+            assert not evidence.isError
+            assert evidence.structuredContent["resultCount"] == 6
+            for item in evidence.structuredContent["results"]:
+                fact = item["facts"][0]
+                assert item["citation"]["pdf_pages"] == [14, 25]
+                if fact["signal"].startswith("S"):
+                    assert item["usageRestriction"] == "not_a_gpio" and not item["usableForCodeGeneration"]
+                else:
+                    assert fact["pin"] in {"P13.0", "P13.1", "P13.2", "P13.3"}
+                    assert fact["active_level"] == "low"
+            print("documentation.search TC4D7 BPL series and TC397 dedicated buttons OK")
 
             if os.environ.get("AURIX_DOCUMENTATION_INDEX_DIR"):
                 documentation = await session.call_tool(

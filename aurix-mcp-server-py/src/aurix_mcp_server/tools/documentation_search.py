@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ..board_documentation import board_evidence
 from ..documentation_retrieval import search_results
 from ..tooldef import ToolContext, ToolResult
 from ..utils import safe_error_message
@@ -36,7 +37,7 @@ def _family_from_text(value: str) -> str | None:
 
 
 def _resolve_family(args: dict[str, Any], query: str) -> str | None:
-	explicit_hints = [args.get("device"), args.get("family")]
+	explicit_hints = [args.get("device"), args.get("family"), args.get("board")]
 	explicit_families = {
 		resolved
 		for hint in explicit_hints
@@ -75,7 +76,7 @@ def _resolve_index_path(index_path: str | None = None, family: str | None = None
 	return resolved
 
 
-def _parse_input(args: dict[str, Any]) -> tuple[str, int, Path]:
+def _parse_input(args: dict[str, Any]) -> tuple[str, int, str | None]:
 	if not isinstance(args, dict):
 		raise ValueError("documentation.search requires an object argument")
 
@@ -90,10 +91,15 @@ def _parse_input(args: dict[str, Any]) -> tuple[str, int, Path]:
 	index_path = args.get("indexPath")
 	if index_path is not None and not isinstance(index_path, str):
 		raise ValueError("indexPath must be a string")
+	for key in ("board", "hardwareVersion", "projectPath", "device", "family"):
+		if args.get(key) is not None and not isinstance(args[key], str):
+			raise ValueError(f"{key} must be a string")
+	if args.get("projectPath") and not Path(args["projectPath"]).is_dir():
+		raise ValueError("projectPath must be an existing directory")
 
 	clean_query = query.strip()
 	family = _resolve_family(args, clean_query)
-	return clean_query, min(top_k, MAX_TOP_K), _resolve_index_path(index_path, family), family
+	return clean_query, min(top_k, MAX_TOP_K), family
 
 
 def _citation_text(result: dict[str, object]) -> str:
@@ -111,6 +117,14 @@ def _citation_text(result: dict[str, object]) -> str:
 	lines = [f"{title}, physical PDF page(s) {page_text}"]
 	if section:
 		lines.append(f"Section: {section}")
+	if citation.get("board"):
+		lines.append(f"Board: {citation['board']}; hardware: {citation['hardware_versions']}; document revision: {citation['document_version']}")
+		lines.append(f"Applicability: {result['applicability']}; usable for code generation: {result['usableForCodeGeneration']}")
+		lines.append(f"BPL check: {result.get('bplCheck', 'not_checked')}")
+		if result.get("usageRestriction"):
+			lines.append(f"Usage restriction: {result['usageRestriction']}")
+		if result.get("missingSignals"):
+			lines.append(f"BPL labels missing: {', '.join(result['missingSignals'])}")
 	lines.append(str(excerpt))
 	if source:
 		lines.append(f"Source: {source}")
@@ -119,8 +133,16 @@ def _citation_text(result: dict[str, object]) -> str:
 
 async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 	try:
-		query, top_k, index_path, family = _parse_input(args)
-		results = search_results(index_path, query, limit=top_k)
+		query, top_k, family = _parse_input(args)
+		board_result = board_evidence(args, query, top_k)
+		if board_result is not None:
+			board_family = _family_from_text(board_result["board"] or "")
+			if args.get("family") and board_family and _family_from_text(args["family"]) != board_family:
+				raise ValueError("board and family refer to different AURIX generations")
+			results = board_result["results"]
+		else:
+			index_path = _resolve_index_path(args.get("indexPath"), family)
+			results = search_results(index_path, query, limit=top_k)
 		structured = {
 			"query": query,
 			"family": family,
@@ -128,9 +150,13 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 			"abstained": not results,
 			"results": results,
 		}
+		if board_result is not None:
+			structured.update(board_result)
+			structured["abstained"] = not any(result["facts"] for result in results)
+			structured["family"] = _family_from_text(board_result["board"] or "") or family
 		if not results:
 			return ToolResult.text(
-				f'No supported documentation evidence found for "{query}".',
+				f'No supported documentation evidence found for "{query}". {structured.get("reason", "")}',
 				structured=structured,
 			)
 

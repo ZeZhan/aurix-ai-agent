@@ -168,18 +168,22 @@ mcp = FastMCP(SERVER_NAME, instructions=build_instructions())
         "Create a device project template from the local ADS installation. "
         "Extracts iLLD libraries, configuration files, linker scripts, and source stubs "
         "for the specified device into a reusable cache directory. "
-        "If 'workspace' is provided, deploys the skeleton into that directory."
+        "If 'workspace' is provided, deploys the skeleton into that directory. "
+        "An optional specific board selects its local BSP pin-label file; existing project BPL files are preserved."
     ),
     annotations=_ann("write"),
 )
-async def ads_create_project(device: str, workspace: str | None = None) -> CallToolResult:
+async def ads_create_project(
+    device: str, workspace: str | None = None, board: str | None = None,
+) -> CallToolResult:
     """Create/deploy an ADS device project template.
 
     Args:
         device: Target device (e.g. TC4D7, TC387, TC397).
         workspace: Target workspace directory to deploy into. If omitted, only caches the template.
+        board: Specific board ID (e.g. KIT_A2G_TC375_LITE). Defaults to the selected board when available.
     """
-    args = _clean(device=device, workspace=workspace)
+    args = _clean(device=device, workspace=workspace, board=board)
     return _to_call_result(await ads_create_project_run(args, _tool_context(None)))
 
 
@@ -307,7 +311,9 @@ async def examples_search(
     description=(
         "Search the generation-appropriate offline AURIX documentation SQLite index. "
         "Returns evidence excerpts with document metadata and physical PDF page citations. "
-        "Specify device/family when the query does not identify the target."
+        "Specify device/family when the query does not identify the target. "
+        "For reviewed board LED/button pins and polarity, provide board and hardwareVersion. "
+        "Optional projectPath checks these facts against the project's BPL; unresolved scope or conflicts must not be used to generate code."
     ),
     annotations=_ann("read"),
 )
@@ -317,6 +323,9 @@ async def documentation_search(
     indexPath: str | None = None,
     device: str | None = None,
     family: str | None = None,
+    board: str | None = None,
+    hardwareVersion: str | None = None,
+    projectPath: str | None = None,
 ) -> CallToolResult:
     """Search indexed AURIX documentation with physical-page citations.
 
@@ -326,8 +335,12 @@ async def documentation_search(
         indexPath: Path to the offline SQLite index. Overrides AURIX_DOCUMENTATION_INDEX.
         device: Target device or board, for example TC375 or KIT_A2G_TC375_LITE.
         family: Target generation, for example TC2xx, TC3xx, or TC4Dx.
+        board: Specific board, for example KIT_A2G_TC375_LITE; not a bare chip.
+        hardwareVersion: Hardware revision, for example V2, not the manual's revision 2.2.
+        projectPath: Optional project directory for read-only BPL pin conflict checks.
     """
-    args = _clean(query=query, topK=topK, indexPath=indexPath, device=device, family=family)
+    args = _clean(query=query, topK=topK, indexPath=indexPath, device=device, family=family,
+                  board=board, hardwareVersion=hardwareVersion, projectPath=projectPath)
     return _to_call_result(await documentation_search_run(args, _tool_context(None)))
 
 
@@ -411,6 +424,8 @@ async def illd_provision(
         "Recursively scan a project directory and return all source files (.c), assembly files (.S/.s/.src), "
         "include directories (containing .h files), and linker scripts (.ld/.lsl). "
         "Also detects the device family from iLLD path patterns. "
+        "Reads root-level BPL pin labels, or the selected board's local BSP without modifying the project. "
+        "BPL labels do not specify electrical polarity. "
         "Use this to discover what files exist on disk when generating a Makefile."
     ),
     annotations=_ann("read"),
@@ -419,6 +434,7 @@ async def project_scan(
     projectPath: str | None = None,
     excludeDirs: list[str] | None = None,
     maxFiles: int | None = None,
+    board: str | None = None,
 ) -> CallToolResult:
     """Scan a project directory for sources, includes and linker scripts.
 
@@ -426,8 +442,9 @@ async def project_scan(
         projectPath: Absolute path to the project root. Default: workspace root.
         excludeDirs: Directories to exclude from scanning (relative to project root).
         maxFiles: Max files to scan.
+        board: Specific board ID for pin-label validation or installation fallback; not a bare chip model.
     """
-    args = _clean(projectPath=projectPath, excludeDirs=excludeDirs, maxFiles=maxFiles)
+    args = _clean(projectPath=projectPath, excludeDirs=excludeDirs, maxFiles=maxFiles, board=board)
     return _to_call_result(await scan_project_run(args, _tool_context(None)))
 
 
