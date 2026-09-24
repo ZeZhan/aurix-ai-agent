@@ -119,6 +119,9 @@ def build_index(chunks_root: Path, database: Path) -> None:
             """
         )
         row_count = 0
+        connection.execute(
+            "CREATE TABLE board_chunks (chunk_id TEXT PRIMARY KEY, board TEXT NOT NULL, metadata TEXT NOT NULL)"
+        )
         for chunks_file in sorted(chunks_root.rglob("chunks.jsonl")):
             with chunks_file.open(encoding="utf-8") as source:
                 for line in source:
@@ -137,6 +140,14 @@ def build_index(chunks_root: Path, database: Path) -> None:
                             chunk["text"],
                         ),
                     )
+                    if chunk.get("board"):
+                        metadata = {key: chunk[key] for key in (
+                            "board", "hardware_versions", "facts", "source_sha256", "document_date",
+                        ) if key in chunk}
+                        connection.execute(
+                            "INSERT INTO board_chunks VALUES (?, ?, ?)",
+                            (chunk["chunk_id"], chunk["board"], json.dumps(metadata)),
+                        )
                     row_count += 1
         connection.commit()
     finally:
@@ -184,6 +195,7 @@ def rows_for_device(
         row
         for row in rows
         if str(row["document_id"]).startswith(document_prefixes)
+        or row["document_type"] == "board_manual"
     ]
 
 
@@ -379,17 +391,19 @@ def retrieve(
     query: str,
     limit: int,
     snippet_tokens: int = 64,
+    scoped: bool = False,
 ) -> list[sqlite3.Row]:
     percentage_values = query_percentage_values(query)
     document_prefixes = query_document_prefixes(query)
-    statement = """
+    scope_filter = " AND rowid IN (SELECT row_id FROM temp.search_scope)" if scoped else ""
+    statement = f"""
             SELECT rowid AS row_id, chunk_id, document_id, document_type,
                                      document_title, document_version, source, headings,
                      pages, text,
                                          snippet(chunks, 8, '', '', ' … ', ?) AS excerpt,
                    bm25(chunks) AS score
             FROM chunks
-            WHERE chunks MATCH ?
+            WHERE chunks MATCH ? {scope_filter}
             ORDER BY score
             LIMIT ?
             """
@@ -419,6 +433,7 @@ def retrieve(
                 final_sentence,
                 1,
                 snippet_tokens,
+                scoped,
             )
             sentence_candidates = [
                 candidate
@@ -489,7 +504,7 @@ def retrieve(
     ]
     for term in strong_anchor_terms:
         corpus_match = connection.execute(
-            "SELECT 1 FROM chunks WHERE chunks MATCH ? LIMIT 1",
+            f"SELECT 1 FROM chunks WHERE chunks MATCH ? {scope_filter} LIMIT 1",
             (quote_fts_term(term),),
         ).fetchone()
         if corpus_match is None:
@@ -684,19 +699,79 @@ def result_from_row(row: sqlite3.Row) -> dict[str, object]:
     }
 
 
+def hardware_version_matches(requested: str, supported: str) -> bool:
+    requested = requested.strip().lower().removeprefix("v")
+    supported = supported.strip().lower().removeprefix("v")
+    if requested == supported:
+        return True
+    if re.fullmatch(r"\d+(?:\.\d+)*\.x", supported):
+        prefix = supported[:-2]
+        return requested == prefix or re.fullmatch(re.escape(prefix) + r"(?:\.\d+)+", requested) is not None
+    return False
+
+
+def board_signal_facts(database: Path, board: str) -> list[dict]:
+    connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        if not connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_chunks'"
+        ).fetchone():
+            return []
+        return [
+            fact
+            for (metadata,) in connection.execute("SELECT metadata FROM board_chunks WHERE board = ?", (board,))
+            for fact in json.loads(metadata).get("facts", [])
+        ]
+    finally:
+        connection.close()
+
+
 def search_results(
     database: Path,
     query: str,
     limit: int = 3,
     snippet_tokens: int = 64,
+    *,
+    board: str | None = None,
+    hardware_version: str | None = None,
 ) -> list[dict[str, object]]:
     connection = sqlite3.connect(database)
     connection.row_factory = sqlite3.Row
     try:
-        rows = retrieve(connection, query, limit, snippet_tokens)
+        has_scope = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_chunks'"
+        ).fetchone() is not None
+        metadata_by_chunk = {}
+        if has_scope:
+            connection.execute("CREATE TEMP TABLE search_scope (row_id INTEGER PRIMARY KEY)")
+            connection.execute(
+                "INSERT INTO search_scope SELECT rowid FROM chunks WHERE chunk_id NOT IN "
+                "(SELECT chunk_id FROM board_chunks)"
+            )
+            requested_version = hardware_version.strip().lower().removeprefix("v") if hardware_version else None
+            for row in connection.execute("SELECT * FROM board_chunks WHERE board = ?", (board,)):
+                metadata = json.loads(row["metadata"])
+                if requested_version and not any(
+                    hardware_version_matches(requested_version, version)
+                    for version in metadata.get("hardware_versions", [])
+                ):
+                    continue
+                metadata_by_chunk[row["chunk_id"]] = metadata
+                connection.execute(
+                    "INSERT INTO search_scope SELECT rowid FROM chunks WHERE chunk_id = ?",
+                    (row["chunk_id"],),
+                )
+        rows = retrieve(connection, query, limit, snippet_tokens, scoped=has_scope)
+        results = [result_from_row(row) for row in rows]
+        for result in results:
+            metadata = metadata_by_chunk.get(result["chunk_id"])
+            if metadata:
+                result["facts"] = metadata.get("facts", [])
+                result["applicability"] = "matched" if hardware_version else "hardware_version_required"
+                result["citation"].update({key: value for key, value in metadata.items() if key != "facts"})
+        return results
     finally:
         connection.close()
-    return [result_from_row(row) for row in rows]
 
 
 def search(database: Path, query: str, limit: int, snippet_tokens: int) -> None:
