@@ -2,9 +2,9 @@
 
 # ⚡ AI Agent for Infineon AURIX™ Microcontrollers
 
-### From one sentence to a blinking LED — in about 2 minutes.
+### From natural-language requirements to firmware running on Infineon AURIX™.
 
-**Tell GitHub Copilot what you want. The agent writes the firmware, builds it with the free GCC compiler, and flashes your Infineon AURIX™ MCU over USB — no manual setup.**
+**Describe the behavior you need. GitHub Copilot uses Infineon AURIX documentation, iLLD drivers, and code examples to create or modify firmware, build it with GCC, and flash it to your board.**
 
 **Built entirely on free tools:** the GCC compiler, AURIX Flasher, and the public iLLD driver library and code examples.
 
