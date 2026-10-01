@@ -66,8 +66,8 @@ BPL 缺失标签时返回 `not_mapped`，不伪造匹配，也不误报引脚冲
 安装 BPL 没有 LED/按钮标签。支持中英文查询及板卡实际信号名称；仅有芯片型号
 不会默认选板。其他板卡、硬件版本和未核对的电气限制不会套用这些证据。
 
-板级小索引位于 Python 包内，不依赖芯片索引或联网。显式 `indexPath` 会覆盖它，
-且须包含板卡元数据。[证据与重建说明](src/aurix_mcp_server/data/board_manuals/README.md)。
+板级小索引位于 Python 包内，不依赖芯片索引或联网。
+[证据与重建说明](src/aurix_mcp_server/data/board_manuals/README.md)。
 
 ## 文档索引
 
@@ -76,13 +76,8 @@ BPL 缺失标签时返回 `not_mapped`，不伪造匹配，也不误报引脚冲
 TC2xx、TC3xx 和 TC4Dx 索引，并根据查询、`device`/`family` 或 Configurator
 所选板卡自动路由。PDF 不会进入 VSIX；独立 Python wheel 不包含这些芯片索引。
 
-独立运行服务器时可以配置索引目录，也可以用 `indexPath` 覆盖：
-
-```pwsh
-$env:AURIX_DOCUMENTATION_INDEX_DIR = "C:\path\to\documentation-indexes"
-# 兼容旧版的单索引覆盖：
-$env:AURIX_DOCUMENTATION_INDEX = "C:\path\to\aurix-documentation.sqlite"
-```
+请通过 AURIX AI 扩展使用内置芯片文档索引进行检索。
+独立 Python 包也提供内置的小型板级事实索引。
 
 ## 运行
 

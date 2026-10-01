@@ -2,7 +2,7 @@
 
 # AURIX AI Agent
 
-**面向 Infineon AURIX™ TriCore™ MCU（TC3xx / TC4x）的 AI 嵌入式软件助手 —— 在 VS Code 中用 Copilot 自动生成、构建并烧录固件。**
+**面向英飞凌 AURIX™ TriCore™ MCU（TC3xx / TC4x）的 AI 嵌入式软件助手 —— 在 VS Code 中用 Copilot 自动生成、构建并烧录固件。**
 
 <a href="./README.md">English</a> | <b>简体中文</b>
 
