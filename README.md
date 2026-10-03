@@ -1,10 +1,10 @@
 <div align="center">
 
-# ⚡ AI Agent for Infineon AURIX™ Microcontrollers
+# AURIX AI Agent | AI Firmware Development for Infineon AURIX
 
 ### From natural-language requirements to firmware running on Infineon AURIX™.
 
-**Describe the behavior you need. GitHub Copilot uses Infineon AURIX documentation, iLLD drivers, and code examples to create or modify firmware, build it with GCC, and flash it to your board.**
+**AURIX AI Agent is a firmware development assistant powered by GitHub Copilot and the Model Context Protocol (MCP) in VS Code. Describe the behavior you need, and it uses Infineon AURIX documentation, iLLD drivers, and code examples to create or modify firmware, build it with GCC, and flash it to your board.**
 
 **Built entirely on free tools:** the GCC compiler, AURIX Flasher, and the public iLLD driver library and code examples.
 
