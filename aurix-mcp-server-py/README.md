@@ -20,6 +20,38 @@ The MCP server for Infineon AURIX™ microcontrollers, built on the official
 | `examples.read_source` | Read source of a specific example |
 | `documentation.search` | Search offline AURIX documentation with device-aware routing and physical PDF page citations |
 
+## Import timing diagnostics
+
+`examples.import` returns `durationMs`, `timingsMs` and `diagnostics`, with a compact
+`Diagnostics:` text summary. Existing tool arguments are unchanged.
+
+- `diagnostics.download` is present for GitHub HTTP downloads: client initialization,
+  request count/total/max time, HTTP status/error counts, response bytes, directory
+  creation time and file open/write/close total/max time. Skipped files are not requests.
+- `diagnostics.stages` records event-loop maximum delay and sample count (250 ms
+  sampling interval), plus progress callback count/total/max time for each stage.
+  A zero sample count does not prove the event loop was never delayed.
+- Heartbeats and completion messages include compact diagnostics; the returned stage
+  metrics also include the final completion notification's callback time.
+
+These measurements overlap and must not be added together. HTTP request time excludes
+the in-flight-file and file-worker queues but includes response-body reads, logging and event-loop
+scheduling, so it is not pure network time. Progress callback time is not client UI
+render time. Local/ZIP imports and Git fallback do not report HTTP download metrics;
+their existing copy/extract/download stage times remain available. Diagnostics do not
+add per-file log entries or change caching, retries or HTTP timeouts.
+
+HTTP imports use a per-import `ThreadPoolExecutor` with at most four file-operation
+threads (`fileIoWorkers`). File existence checks, directory creation and open/write/close
+run there, not on the event-loop thread. A four-slot semaphore bounds submitted file
+operations; a separate 12-slot semaphore covers each file from preparation through
+completed write, bounding buffered responses as well as HTTP concurrency. File timings
+are measured inside workers and exclude queue time; concurrent worker totals can exceed
+wall time. Only the event-loop thread merges counters. Filesystem failures are reported
+per file. Cancellation stops queued transfers and waits for active file operations to
+finish before returning; thread-pool shutdown also runs off the event loop. An already
+running filesystem call cannot be forcibly interrupted, so cancellation may wait for it.
+
 ## iLLD version reporting
 
 `ads.create_project` and `project.scan` report the iLLD version declared in local

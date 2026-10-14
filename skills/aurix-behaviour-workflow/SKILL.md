@@ -34,10 +34,22 @@ only when requested. Update each item as it starts and completes.
    *partial-reuse*, or *reference-only* (see Hard rule 5 in
    copilot-instructions.md).
 3. **Setup** — follow Hard rule 1 based on the reuse classification from step 2.
+   After a successful `examples.import`, use its Makefile-readiness line or
+   `hasMakefile` field. Import attempts regeneration when dependencies, device
+   configuration and ADS are available. If a Makefile exists, try building
+   without another scan or scaffold solely to confirm/create it. A missing
+   Makefile still requires `ads.create_project`; other missing dependencies or
+   toolchain errors may also require setup repair.
 4. **Write application code.** Start from the skeleton's or imported example's
-   `Cpu0_Main.c`; extend the existing init sequence.
-5. **Build** (`build.run`). On failure, read the **first** error and fix the
-   root cause — typically a source typo, not the Makefile. Max 3 repair
+   `Cpu0_Main.c`; extend the existing init sequence. Avoid unrelated cosmetic
+   cleanup. Diagnose warnings that affect correctness, prototypes, types or
+   ABI before flashing, including warnings in official examples.
+5. **Build** (`build.run`). Its result already carries the exit code, the
+   extracted error/warning lines and the output tail; do not re-read the raw
+   log unless diagnostic context is missing. `logTruncated` marks a preview;
+   `logFiles` points to full logs and `logFileErrors` reports incomplete or
+   unavailable logs. On failure, read the **first** error and
+   fix the root cause — typically a source typo, not the Makefile. Max 3 repair
    iterations; if a `-mcpu`/toolchain-flag error appears, regenerate via
    `ads.create_project` rather than hand-editing. Missing iLLD source ⇒
    `illd.provision`.

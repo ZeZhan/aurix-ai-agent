@@ -7,18 +7,97 @@ toolchain (make + tricore-gcc) to PATH. Mirrors src/tools.buildRun.ts.
 from __future__ import annotations
 
 import asyncio
+import codecs
 import glob
 import os
 import re
+import tempfile
 import time
+from collections import deque
 from typing import Any, Optional
 
 from ..context import context_get, load_workspace_context
 from ..tooldef import TextContent, ToolContext, ToolResult
-from ..utils import LimitedBuffer, ensure_directory
+from ..utils import ensure_directory
 
 DEFAULT_BUILD_TIMEOUT_MS = 10 * 60 * 1000
 DEFAULT_BUILD_COMMAND = "make --output-sync -j20 all"
+
+TAIL_LINES = 120
+MAX_ERROR_LINES = 200
+MAX_WARNING_LINES = 20
+SUCCESS_TAIL_LINES = 8
+MAX_LINE_CHARS = 1000
+MAX_TAIL_CHARS = 4000
+MAX_ERROR_CHARS = 6000
+MAX_WARNING_CHARS = 2000
+
+_ERROR_RE = re.compile(
+    r"(?i)(?:\berror\s*:|\*\*\*|undefined reference|no rule to make target"
+    r"|ld(?:\.exe)? returned|recipe for target .* failed|cannot find)"
+)
+_WARNING_RE = re.compile(r"(?i)\bwarnings?\b")
+
+
+class BuildLog:
+    """Bounded diagnostic preview; complete streams are retained in log files."""
+
+    def __init__(self) -> None:
+        self._pending = ""
+        self._tail: deque[str] = deque(maxlen=TAIL_LINES)
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+        self.error_count = 0
+        self.warning_count = 0
+        self.line_count = 0
+        self._text_truncated = False
+
+    def feed(self, text: str) -> None:
+        self._pending += text
+        *complete, self._pending = self._pending.split("\n")
+        for line in complete:
+            self._add(line.rstrip("\r"))
+        self._pending = self._limit_line(self._pending)
+
+    def close(self) -> None:
+        if self._pending:
+            self._add(self._pending.rstrip("\r"))
+            self._pending = ""
+
+    def _limit_line(self, line: str) -> str:
+        if len(line) > MAX_LINE_CHARS:
+            self._text_truncated = True
+            return line[:MAX_LINE_CHARS - 3] + "..."
+        return line
+
+    def _add(self, line: str) -> None:
+        self.line_count += 1
+        self._tail.append(self._limit_line(line))
+        stripped = line.strip()
+        if not stripped:
+            return
+        if _WARNING_RE.search(stripped):
+            self.warning_count += 1
+            preview = self._limit_line(stripped)
+            if (len(self.warnings) < MAX_WARNING_LINES
+                    and sum(map(len, self.warnings)) + len(preview) <= MAX_WARNING_CHARS):
+                self.warnings.append(preview)
+        elif _ERROR_RE.search(stripped):
+            self.error_count += 1
+            preview = self._limit_line(stripped)
+            if (len(self.errors) < MAX_ERROR_LINES
+                    and sum(map(len, self.errors)) + len(preview) <= MAX_ERROR_CHARS):
+                self.errors.append(preview)
+
+    @property
+    def truncated(self) -> bool:
+        return (self._text_truncated or self.line_count > len(self._tail)
+                or len("\n".join(self._tail)) > MAX_TAIL_CHARS
+                or self.error_count > len(self.errors)
+                or self.warning_count > len(self.warnings))
+
+    def tail_text(self, count: int = TAIL_LINES) -> str:
+        return "\n".join(list(self._tail)[-count:])[-MAX_TAIL_CHARS:]
 
 
 def _normalize_build_command(command: str, fallback: str = DEFAULT_BUILD_COMMAND) -> str:
@@ -179,30 +258,56 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     started_at = time.monotonic()
     timed_out = False
 
-    stdout_buf = LimitedBuffer()
-    stderr_buf = LimitedBuffer()
+    stdout_log = BuildLog()
+    stderr_log = BuildLog()
+    log_files: dict[str, str] = {}
+    log_file_errors: dict[str, str] = {}
 
     subprocess_factory = asyncio.create_subprocess_shell if shell else asyncio.create_subprocess_exec
     proc = await subprocess_factory(
         command, cwd=cwd, env=env,
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
 
-    async def pump(stream: asyncio.StreamReader, buf: LimitedBuffer,
+    async def pump(stream: asyncio.StreamReader, log: BuildLog,
                    kind: str) -> None:
-        while True:
-            chunk = await stream.read(4096)
-            if not chunk:
-                break
-            buf.append(chunk)
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        full_log = None
+        try:
             try:
-                await ctx.send_progress(chunk.decode("utf-8", errors="replace"), kind)  # type: ignore[arg-type]
-            except Exception:
-                pass
+                full_log = tempfile.NamedTemporaryFile(
+                    mode="wb", prefix=f"aurix-build-{kind}-", suffix=".log", delete=False,
+                )
+                log_files[kind] = full_log.name
+            except OSError as error:
+                log_file_errors[kind] = str(error)
+            while True:
+                chunk = await stream.read(4096)
+                if not chunk:
+                    log.feed(decoder.decode(b"", final=True))
+                    break
+                if full_log is not None and kind not in log_file_errors:
+                    try:
+                        full_log.write(chunk)
+                    except OSError as error:
+                        log_file_errors[kind] = str(error)
+                text = decoder.decode(chunk)
+                log.feed(text)
+                try:
+                    await ctx.send_progress(text, kind)  # type: ignore[arg-type]
+                except Exception:
+                    pass
+        finally:
+            if full_log is not None:
+                try:
+                    full_log.close()
+                except OSError as error:
+                    log_file_errors[kind] = str(error)
 
     pumps = asyncio.gather(
-        pump(proc.stdout, stdout_buf, "stdout"),  # type: ignore[arg-type]
-        pump(proc.stderr, stderr_buf, "stderr"),  # type: ignore[arg-type]
+        pump(proc.stdout, stdout_log, "stdout"),  # type: ignore[arg-type]
+        pump(proc.stderr, stderr_log, "stderr"),  # type: ignore[arg-type]
     )
 
     exit_code: Optional[int]
@@ -224,15 +329,46 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         pass
 
     duration_ms = int((time.monotonic() - started_at) * 1000)
-    stdout = stdout_buf.text()
-    stderr = stderr_buf.text()
+    stdout_log.close()
+    stderr_log.close()
     ok = (not timed_out) and exit_code == 0
 
-    text = (
+    errors = stderr_log.errors + stdout_log.errors
+    warnings = stderr_log.warnings + stdout_log.warnings
+    error_count = stderr_log.error_count + stdout_log.error_count
+    warning_count = stderr_log.warning_count + stdout_log.warning_count
+    tail_count = SUCCESS_TAIL_LINES if ok else TAIL_LINES
+    stdout = stdout_log.tail_text(tail_count)
+    stderr = stderr_log.tail_text(tail_count)
+    log_truncated = (stdout_log.truncated or stderr_log.truncated
+                     or stdout_log.line_count > tail_count or stderr_log.line_count > tail_count)
+
+    headline = (
         f"build.run succeeded (exitCode={exit_code}, durationMs={duration_ms})"
         if ok else
         f"build.run failed (exitCode={exit_code}, timedOut={str(timed_out).lower()}, durationMs={duration_ms})"
     )
+    sections = [headline]
+    if ok:
+        sections.append(stdout)
+    else:
+        if errors:
+            shown = errors[:MAX_WARNING_LINES]
+            sections.append(f"Errors ({error_count} line(s), showing {len(shown)}):")
+            sections.extend(shown)
+        for kind, tail in (("stdout", stdout), ("stderr", stderr)):
+            if tail:
+                sections.append(f"--- {kind} tail ---\n{tail}")
+    if warning_count:
+        sections.append(f"Warnings ({warning_count} line(s), showing {len(warnings[:5])}):")
+        sections.extend(warnings[:5])
+    if log_truncated:
+        sections.append("Output preview truncated; read logFiles for complete diagnostic context.")
+    for kind, path in log_files.items():
+        sections.append(f"{kind} log: {path}")
+    for kind, error in log_file_errors.items():
+        sections.append(f"{kind} full log unavailable or incomplete: {error}")
+    text = "\n".join(section for section in sections if section)
 
     return ToolResult(
         content=[TextContent(text=text)],
@@ -247,6 +383,13 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             "timedOut": timed_out,
             "exitCode": exit_code,
             "durationMs": duration_ms,
+            "errorCount": error_count,
+            "warningCount": warning_count,
+            "errors": errors,
+            "warnings": warnings,
+            "logTruncated": log_truncated,
+            "logFiles": log_files,
+            "logFileErrors": log_file_errors,
             "stdout": stdout,
             "stderr": stderr,
         },
