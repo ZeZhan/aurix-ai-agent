@@ -192,7 +192,8 @@ async def ads_create_project(
     description=(
         "Build an AURIX project with auto-detected tricore-gcc and make. "
         "For a normal build, pass workspace only and omit command; command is reserved "
-        "for an actual custom shell command."
+        "for an actual custom shell command. Results include bounded diagnostic previews; "
+        "logFiles points to full stdout/stderr logs when more context is needed."
     ),
     annotations=_ann("write"),
 )
@@ -227,7 +228,8 @@ async def build_run(
     name="examples.import",
     description=(
         "Import (download) a complete AURIX code example from the GitHub repository "
-        "into a local target directory."
+        "into a local target directory. Reports hasMakefile after attempting regeneration; "
+        "an existing Makefile does not need another scaffold solely for Makefile creation."
     ),
     annotations=_ann("write"),
 )
@@ -236,6 +238,7 @@ async def examples_import(
     targetDir: str,
     indexPath: str | None = None,
     overwrite: bool | None = None,
+    ctx: Context | None = None,
 ) -> CallToolResult:
     """Download a full code example into a local directory.
 
@@ -246,13 +249,15 @@ async def examples_import(
         overwrite: Overwrite existing files. Default: false.
     """
     args = _clean(id=id, targetDir=targetDir, indexPath=indexPath, overwrite=overwrite)
-    return _to_call_result(await _import_run(args, _tool_context(None)))
+    return _to_call_result(await _import_run(args, _tool_context(ctx)))
 
 
 @mcp.tool(
     name="examples.read_source",
     description=(
-        "Read the full source code files of an AURIX code example. "
+        "Read source code files of an AURIX code example. Default CPU-main previews "
+        "are budgeted, CPU0 first, with truncation metadata. Pass files explicitly "
+        "for complete source contents in the requested order. "
         "Uses raw.githubusercontent.com (no API rate limit)."
     ),
     annotations=_ann("read"),
@@ -266,7 +271,7 @@ async def examples_read_source(
 
     Args:
         id: Example ID from the examples index.
-        files: Specific files to read. If omitted, reads cpuMainFiles from the index.
+        files: Specific files to read in full. If omitted, returns budgeted cpuMainFiles previews, CPU0 first.
         indexPath: Optional path to a custom examples index.
     """
     args = _clean(id=id, files=files, indexPath=indexPath)

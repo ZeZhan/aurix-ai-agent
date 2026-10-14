@@ -200,6 +200,50 @@ class BoardPinLookupTests(unittest.TestCase):
         self.assertEqual(result.structured_content["scan"]["boardPins"]["pins"][0]["pin"], "P00.5")
         self.assertEqual(list(self.workspace.iterdir()), [])
 
+    def test_scan_summary_preserves_inventory_and_makefile_state(self) -> None:
+        (self.workspace / BPL_FILENAME).write_text(TC375_BPL, encoding="utf-8")
+        (self.workspace / "Cpu0_Main.c").touch()
+        library = self.workspace / "Libraries" / "iLLD" / "TC37A" / "Driver"
+        library.mkdir(parents=True)
+        sources = [library / f"Driver{index}.c" for index in range(150)]
+        for source in sources:
+            source.touch()
+        (library / "Driver.h").touch()
+        (self.workspace / "linker.ld").touch()
+        for has_makefile in (False, True):
+            with self.subTest(has_makefile=has_makefile):
+                if has_makefile:
+                    (self.workspace / "Makefile").write_text("all:\n", encoding="utf-8")
+                result = asyncio.run(scan_project._run({
+                    "projectPath": str(self.workspace), "board": self.board,
+                }, None))
+                self.assertFalse(result.is_error)
+                report = result.structured_content["scan"]
+                text = result.content[0].text
+                self.assertEqual(report["hasMakefile"], has_makefile)
+                self.assertEqual(report["stats"]["totalCFiles"], 151)
+                self.assertIn(sources[-1].relative_to(self.workspace).as_posix(), report["cSources"])
+                self.assertIn(library.relative_to(self.workspace).as_posix(), report["includeDirs"])
+                self.assertEqual(report["linkerScripts"], ["linker.ld"])
+                self.assertIn("Makefile: present" if has_makefile else "Makefile: missing", text)
+                self.assertIn("Cpu0_Main.c", text)
+                self.assertIn("LED1", text)
+                self.assertIn("P00.5", text)
+                self.assertNotIn("Driver149.c", text)
+                self.assertLess(len(text), 6000)
+
+    def test_scan_summary_keeps_board_conflicts_visible(self) -> None:
+        (self.workspace / BPL_FILENAME).write_text(
+            TC375_BPL.replace("AURIX TC375 LITE KIT", "KIT_A2G_TC375_ARD_SB"), encoding="utf-8",
+        )
+        result = asyncio.run(scan_project._run({
+            "projectPath": str(self.workspace), "board": self.board,
+        }, None))
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["scan"]["boardPins"]["status"], "conflict")
+        self.assertEqual(result.structured_content["scan"]["boardPins"]["pins"], [])
+        self.assertIn("conflict", result.content[0].text.lower())
+
     def test_invalid_bpl_does_not_break_source_scan(self) -> None:
         (self.workspace / BPL_FILENAME).write_text("broken", encoding="utf-8")
         (self.workspace / "main.c").touch()

@@ -15,8 +15,10 @@ import json
 import os
 import re
 import shutil
+import time
 import zipfile
-from typing import Any, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Coroutine, Optional, TypeVar
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
@@ -28,6 +30,13 @@ from ..utils import safe_error_message
 
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 50
+MAX_SOURCE_CHARS_PER_FILE = 20000
+MAX_SOURCE_CHARS_TOTAL = 60000
+IMPORT_PROGRESS_INTERVAL_SECONDS = 5
+IMPORT_LOOP_SAMPLE_SECONDS = 0.25
+DOWNLOAD_CONCURRENCY = 12
+DOWNLOAD_FILE_WORKERS = 4
+_StageResult = TypeVar("_StageResult")
 
 # Cache for loaded index
 _index_cache: dict[str, Any] = {}
@@ -117,6 +126,35 @@ def _summarize_text(value: str, max_chars: int) -> str:
     if len(trimmed) <= max_chars:
         return trimmed
     return trimmed[: max_chars - 3].strip() + "..."
+
+
+def _build_readiness_note(target: str, regen_msg: Optional[str]) -> str:
+    if os.path.isfile(os.path.join(target, "Makefile")):
+        detail = f"\n{regen_msg}" if regen_msg else ""
+        return detail + "\nMakefile: present (try build.run; no scaffold needed solely for Makefile creation)."
+    return "\nNo Makefile was generated: call ads.create_project for this device before build.run."
+
+
+def _cpu_main_sort_key(rel_file: str) -> tuple[int, str]:
+    """Order Cpu0_Main.c first so the entry point survives the output budget."""
+    match = re.search(r"cpu(\d+)_main", rel_file, re.IGNORECASE)
+    return (int(match.group(1)), rel_file.lower()) if match else (99, rel_file.lower())
+
+
+def _apply_source_budget(results: list[dict[str, Any]]) -> None:
+    """Truncate file contents in place so one oversized file cannot crowd out
+    the rest of the response. Earlier entries get their allowance first."""
+    remaining = MAX_SOURCE_CHARS_TOTAL
+    for item in results:
+        if "error" in item:
+            continue
+        content = item["content"]
+        allowance = min(MAX_SOURCE_CHARS_PER_FILE, max(remaining, 0))
+        if len(content) > allowance:
+            item["originalChars"] = len(content)
+            item["truncated"] = True
+            item["content"] = content[:allowance]
+        remaining -= len(item["content"])
 
 
 def _family_to_regex(family: str) -> re.Pattern[str]:
@@ -270,7 +308,7 @@ async def _download_via_manifest(
     owner: str, repo: str, branch: str,
     remote_dir: str, local_dir: str, overwrite: bool,
     file_list: list[str],
-) -> dict[str, list[str]]:
+) -> dict[str, Any]:
     """Download files from raw.githubusercontent.com using a pre-built manifest.
 
     No GitHub API calls, no git clone — just direct CDN downloads.
@@ -284,42 +322,131 @@ async def _download_raw_files(
     owner: str, repo: str, branch: str,
     remote_dir: str, local_dir: str, overwrite: bool,
     file_list: list[str],
-) -> dict[str, list[str]]:
+) -> dict[str, Any]:
     normalized_remote = remote_dir.replace("\\", "/").strip("/")
     downloaded: list[str] = []
     skipped: list[str] = []
     errors: list[str] = []
-    semaphore = asyncio.Semaphore(12)
+    semaphore = asyncio.Semaphore(DOWNLOAD_CONCURRENCY)
+    file_slots = asyncio.Semaphore(DOWNLOAD_FILE_WORKERS)
+    loop = asyncio.get_running_loop()
+    diagnostics: dict[str, Any] = {
+        "backend": "http",
+        "fileIoWorkers": DOWNLOAD_FILE_WORKERS,
+        "clientInitMs": 0.0,
+        "httpRequestCount": 0,
+        "httpRequestTotalMs": 0.0,
+        "httpRequestMaxMs": 0.0,
+        "httpErrorCount": 0,
+        "httpResponseBytes": 0,
+        "httpStatusCounts": {},
+        "mkdirMs": 0.0,
+        "writeMs": 0.0,
+        "writeMaxMs": 0.0,
+        "filesWritten": 0,
+    }
+
+    def prepare_file(local_path: str) -> tuple[bool, float, Optional[str]]:
+        mkdir_started = time.monotonic()
+        try:
+            if not overwrite and os.path.exists(local_path):
+                return True, 0.0, None
+            mkdir_started = time.monotonic()
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        except Exception as error:
+            return False, (time.monotonic() - mkdir_started) * 1000, str(error)
+        return False, (time.monotonic() - mkdir_started) * 1000, None
+
+    def write_file(local_path: str, content: bytes) -> tuple[float, Optional[str]]:
+        write_started = time.monotonic()
+        error_message = None
+        try:
+            with open(local_path, "wb") as fh:
+                fh.write(content)
+        except Exception as error:
+            error_message = str(error)
+        return (time.monotonic() - write_started) * 1000, error_message
+
+    async def file_io(operation, *arguments):
+        async with file_slots:
+            return await loop.run_in_executor(file_executor, operation, *arguments)
 
     async def download_one(
         client: httpx.AsyncClient, rel_path: str
     ) -> tuple[str, str, Optional[str]]:
+        async with semaphore:
+            return await transfer_file(client, rel_path)
+
+    async def transfer_file(
+        client: httpx.AsyncClient, rel_path: str
+    ) -> tuple[str, str, Optional[str]]:
         local_path = os.path.join(local_dir, *rel_path.split("/"))
-        if not overwrite and os.path.exists(local_path):
-            return "skipped", rel_path, None
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
         raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{normalized_remote}/{rel_path}"
         try:
-            async with semaphore:
+            skip, mkdir_ms, error = await file_io(prepare_file, local_path)
+            diagnostics["mkdirMs"] += mkdir_ms
+            if error is not None:
+                return "error", rel_path, f"{rel_path}: {error}"
+            if skip:
+                return "skipped", rel_path, None
+            request_started = time.monotonic()
+            diagnostics["httpRequestCount"] += 1
+            try:
                 response = await client.get(raw_url)
+            except Exception:
+                diagnostics["httpErrorCount"] += 1
+                raise
+            finally:
+                request_ms = (time.monotonic() - request_started) * 1000
+                diagnostics["httpRequestTotalMs"] += request_ms
+                diagnostics["httpRequestMaxMs"] = max(diagnostics["httpRequestMaxMs"], request_ms)
+            status = str(response.status_code)
+            diagnostics["httpStatusCounts"][status] = diagnostics["httpStatusCounts"].get(status, 0) + 1
+            diagnostics["httpResponseBytes"] += len(response.content)
             if response.status_code != 200:
+                diagnostics["httpErrorCount"] += 1
                 return "error", rel_path, f"{rel_path}: HTTP {response.status_code}"
-            with open(local_path, "wb") as fh:
-                fh.write(response.content)
+            write_ms, error = await file_io(write_file, local_path, response.content)
+            diagnostics["writeMs"] += write_ms
+            diagnostics["writeMaxMs"] = max(diagnostics["writeMaxMs"], write_ms)
+            if error is not None:
+                return "error", rel_path, f"{rel_path}: {error}"
+            diagnostics["filesWritten"] += 1
             return "downloaded", rel_path, None
         except Exception as e:
             return "error", rel_path, f"{rel_path}: {e}"
 
-    limits = httpx.Limits(max_connections=12, max_keepalive_connections=12)
-    async with httpx.AsyncClient(
+    limits = httpx.Limits(max_connections=DOWNLOAD_CONCURRENCY, max_keepalive_connections=DOWNLOAD_CONCURRENCY)
+    client_started = time.monotonic()
+    client = httpx.AsyncClient(
         headers=_github_headers(),
         timeout=30,
         follow_redirects=True,
         limits=limits,
-    ) as client:
-        results = await asyncio.gather(
-            *(download_one(client, rel_path) for rel_path in file_list)
-        )
+    )
+    diagnostics["clientInitMs"] = (time.monotonic() - client_started) * 1000
+    file_executor = ThreadPoolExecutor(max_workers=DOWNLOAD_FILE_WORKERS, thread_name_prefix="aurix-file")
+    try:
+        async with client:
+            tasks = [asyncio.create_task(download_one(client, rel_path)) for rel_path in file_list]
+            try:
+                results = await asyncio.gather(*tasks)
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        shutdown = asyncio.create_task(asyncio.to_thread(file_executor.shutdown, wait=True, cancel_futures=True))
+        cancelled = False
+        while not shutdown.done():
+            try:
+                await asyncio.shield(shutdown)
+            except asyncio.CancelledError:
+                cancelled = True
+        await shutdown
+        if cancelled:
+            raise asyncio.CancelledError
     for status, rel_path, error in results:
         if status == "downloaded":
             downloaded.append(rel_path)
@@ -328,14 +455,20 @@ async def _download_raw_files(
         elif error is not None:
             errors.append(error)
 
-    return {"downloaded": downloaded, "skipped": skipped, "errors": errors}
+    return {
+        "downloaded": downloaded, "skipped": skipped, "errors": errors,
+        "downloadDiagnostics": {
+            key: round(value, 3) if isinstance(value, float) else value
+            for key, value in diagnostics.items()
+        },
+    }
 
 
 async def _download_github_directory(
     owner: str, repo: str, branch: str,
     remote_dir: str, local_dir: str, overwrite: bool,
     file_list: Optional[list[str]] = None,
-) -> dict[str, list[str]]:
+) -> dict[str, Any]:
     """Download a directory from its manifest, with API/git as legacy fallbacks."""
     if file_list:
         return await _download_via_manifest(
@@ -362,7 +495,7 @@ async def _download_from_entries(
     owner: str, repo: str, branch: str,
     remote_dir: str, entries: list[dict[str, Any]],
     local_dir: str, overwrite: bool,
-) -> dict[str, list[str]]:
+) -> dict[str, Any]:
     normalized_remote = remote_dir.replace("\\", "/").strip("/")
     blobs = [e for e in entries if e.get("type") == "blob"]
     return await _download_raw_files(
@@ -564,6 +697,113 @@ async def _search_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 # examples.import
 # ---------------------------------------------------------------------------
 
+async def _run_import_stage(
+    stage: str, operation: Coroutine[Any, Any, _StageResult],
+    ctx: ToolContext, timings: dict[str, int],
+    diagnostics: Optional[dict[str, Any]] = None,
+) -> _StageResult:
+    metrics: dict[str, Any] = {
+        "eventLoopLagMaxMs": 0.0,
+        "eventLoopSampleCount": 0,
+        "progressSendTotalMs": 0.0,
+        "progressSendMaxMs": 0.0,
+        "progressSendCount": 0,
+    }
+
+    async def report(message: str) -> None:
+        send_started = time.monotonic()
+        metrics["progressSendCount"] += 1
+        try:
+            await ctx.send_progress(f"examples.import: {message}", "stdout")
+        except Exception:
+            pass
+        finally:
+            elapsed_ms = (time.monotonic() - send_started) * 1000
+            metrics["progressSendTotalMs"] += elapsed_ms
+            metrics["progressSendMaxMs"] = max(metrics["progressSendMaxMs"], elapsed_ms)
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + IMPORT_LOOP_SAMPLE_SECONDS
+
+    def record_lag(now: float) -> None:
+        metrics["eventLoopSampleCount"] += 1
+        metrics["eventLoopLagMaxMs"] = max(metrics["eventLoopLagMaxMs"], max(0.0, now - deadline) * 1000)
+
+    def sample_loop() -> None:
+        nonlocal deadline, timer
+        now = loop.time()
+        record_lag(now)
+        deadline = now + IMPORT_LOOP_SAMPLE_SECONDS
+        timer = loop.call_at(deadline, sample_loop)
+
+    def progress_summary() -> str:
+        return (
+            f"loopLagMax={metrics['eventLoopLagMaxMs']:.1f} ms; "
+            f"progressSendSum={metrics['progressSendTotalMs']:.1f} ms"
+        )
+
+    started = time.monotonic()
+    task = asyncio.create_task(operation)
+    timer = loop.call_at(deadline, sample_loop)
+    try:
+        try:
+            await report(f"{stage} started")
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=IMPORT_PROGRESS_INTERVAL_SECONDS)
+                if task in done:
+                    break
+                await report(f"{stage} still running ({time.monotonic() - started:.1f}s elapsed); {progress_summary()}")
+            result = await task
+        except Exception:
+            await report(f"{stage} failed ({time.monotonic() - started:.1f}s elapsed); {progress_summary()}")
+            raise
+        finally:
+            timings[stage] = int((time.monotonic() - started) * 1000)
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        details = ""
+        if isinstance(result, dict) and "downloadDiagnostics" in result:
+            details = "; downloadDiagnostics=" + json.dumps(result["downloadDiagnostics"], separators=(",", ":"))
+        await report(f"{stage} completed ({timings[stage]} ms); {progress_summary()}{details}")
+        return result
+    finally:
+        now = loop.time()
+        if now > deadline:
+            record_lag(now)
+        timer.cancel()
+        if diagnostics is not None:
+            diagnostics[stage] = {
+                key: round(value, 3) if isinstance(value, float) else value
+                for key, value in metrics.items()
+            }
+
+
+def _import_timing_summary(
+    started: float, timings: dict[str, int], diagnostics: dict[str, Any],
+) -> tuple[int, str]:
+    duration_ms = int((time.monotonic() - started) * 1000)
+    stages = ", ".join(f"{stage}={duration} ms" for stage, duration in timings.items())
+    stage_metrics = list(diagnostics["stages"].values())
+    details = (
+        f"loopLagMax={max((stage['eventLoopLagMaxMs'] for stage in stage_metrics), default=0):.1f} ms; "
+        f"progressSendSum={sum(stage['progressSendTotalMs'] for stage in stage_metrics):.1f} ms"
+    )
+    download = diagnostics.get("download")
+    if download:
+        details += (
+            f"; clientInit={download['clientInitMs']:.1f} ms; "
+            f"httpRequests={download['httpRequestCount']}; httpRequestSum={download['httpRequestTotalMs']:.1f} ms; "
+            f"httpRequestMax={download['httpRequestMaxMs']:.1f} ms; "
+            f"mkdir={download['mkdirMs']:.1f} ms; write={download['writeMs']:.1f} ms"
+        )
+    return duration_ms, (
+        f"\nTiming: total={duration_ms} ms; {stages}\nDiagnostics: {details}"
+        "\nDiagnostic times overlap; HTTP includes response body, logging and scheduling, not just network. "
+        "Progress measures callback wait, not client UI display."
+    )
+
+
 async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     example_id = args.get("id", "").strip()
     target_dir = args.get("targetDir", "").strip()
@@ -572,8 +812,14 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     if not target_dir:
         raise ValueError("examples.import requires targetDir")
 
+    started_at = time.monotonic()
+    timings_ms: dict[str, int] = {}
+    stage_diagnostics: dict[str, Any] = {}
+    diagnostics: dict[str, Any] = {"stages": stage_diagnostics}
     index_path_arg = args.get("indexPath")
-    _, data = _load_examples_index(index_path_arg)
+    _, data = await _run_import_stage(
+        "index", asyncio.to_thread(_load_examples_index, index_path_arg), _ctx, timings_ms, stage_diagnostics,
+    )
     example = next((e for e in data["examples"] if _normalize(e.get("id", "")) == _normalize(example_id)), None)
     if not example:
         raise ValueError(f"Example not found: {example_id}")
@@ -588,45 +834,42 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 
     if gh:
         remote_path = f"{gh['pathPrefix']}/{example['rootPath']}" if gh["pathPrefix"] else example["rootPath"]
-        manifest = _load_manifest()
+        manifest = await _run_import_stage("manifest", asyncio.to_thread(_load_manifest), _ctx, timings_ms, stage_diagnostics)
         file_list = manifest.get(example.get("rootPath", ""))
-        download_task = asyncio.create_task(
+        result = await _run_import_stage(
+            "download",
             _download_github_directory(
                 gh["owner"], gh["repo"], gh["branch"], remote_path, target, overwrite, file_list
-            )
+            ),
+            _ctx, timings_ms, stage_diagnostics,
         )
-        elapsed_seconds = 0
-        await _ctx.send_progress(
-            f"examples.import: downloading {example['id']} to {target}", "stdout"
-        )
-        while not download_task.done():
-            done, _ = await asyncio.wait({download_task}, timeout=10)
-            if download_task in done:
-                break
-            elapsed_seconds += 10
-            await _ctx.send_progress(
-                f"examples.import: still downloading {example['id']} ({elapsed_seconds}s elapsed)",
-                "stdout",
-            )
-        result = await download_task
+        if "downloadDiagnostics" in result:
+            diagnostics["download"] = result["downloadDiagnostics"]
         ok = not result["errors"] and bool(result["downloaded"])
         error_detail = ("\nErrors:\n" + "\n".join(result["errors"])) if result["errors"] else ""
-        regen_msg = regenerate_makefile_for_workspace(target) if ok else None
+        regen_msg = await _run_import_stage(
+            "makefile", asyncio.to_thread(regenerate_makefile_for_workspace, target), _ctx, timings_ms, stage_diagnostics,
+        ) if ok else None
+        duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
         text = (
             f"examples.import succeeded: {len(result['downloaded'])} file(s) downloaded to {target}"
-            f"{f'{chr(10)}{regen_msg}' if regen_msg else ''}"
+            f"{_build_readiness_note(target, regen_msg)}"
             if ok else
             f"examples.import failed: {len(result['downloaded'])} downloaded, {len(result['errors'])} error(s).{error_detail}"
             f"{'\nHint: This is likely a GitHub API rate limit (60 req/hr unauthenticated). Try again later or download manually from https://github.com/Infineon/AURIX_code_examples.' if not result['downloaded'] else ''}"
         )
         return ToolResult(
-            content=[TextContent(text=text)],
+            content=[TextContent(text=text + timing_note)],
             is_error=not ok,
             structured_content={
                 "ok": ok,
                 "exampleId": example["id"],
                 "sourceRoot": source_root,
                 "targetDir": target,
+                "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")),
+                "durationMs": duration_ms,
+                "timingsMs": timings_ms,
+                "diagnostics": diagnostics,
                 "downloaded": result["downloaded"],
                 "skipped": result["skipped"],
                 "errors": result["errors"],
@@ -638,39 +881,49 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         if not os.path.isfile(zip_path):
             raise FileNotFoundError(f"Zip file not found: {zip_path}")
         prefix = f"{inner_prefix}/{example['rootPath']}/".replace("\\", "/").replace("//", "/")
-        downloaded: list[str] = []
-        skipped_files: list[str] = []
-        errors: list[str] = []
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            for name in zf.namelist():
-                if not name.startswith(prefix) or name.endswith("/"):
-                    continue
-                rel = name[len(prefix):]
-                local_path = os.path.join(target, *rel.split("/"))
-                if not overwrite and os.path.exists(local_path):
-                    skipped_files.append(rel)
-                    continue
-                try:
-                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                    with zf.open(name) as src, open(local_path, "wb") as dst:
-                        dst.write(src.read())
-                    downloaded.append(rel)
-                except Exception as e:
-                    errors.append(f"{rel}: {e}")
+
+        def extract() -> tuple[list[str], list[str], list[str]]:
+            downloaded: list[str] = []
+            skipped_files: list[str] = []
+            errors: list[str] = []
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for name in zf.namelist():
+                    if not name.startswith(prefix) or name.endswith("/"):
+                        continue
+                    rel = name[len(prefix):]
+                    local_path = os.path.join(target, *rel.split("/"))
+                    if not overwrite and os.path.exists(local_path):
+                        skipped_files.append(rel)
+                        continue
+                    try:
+                        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                        with zf.open(name) as src, open(local_path, "wb") as dst:
+                            dst.write(src.read())
+                        downloaded.append(rel)
+                    except Exception as error:
+                        errors.append(f"{rel}: {error}")
+            return downloaded, skipped_files, errors
+
+        downloaded, skipped_files, errors = await _run_import_stage(
+            "extract", asyncio.to_thread(extract), _ctx, timings_ms, stage_diagnostics,
+        )
 
         ok = not errors and bool(downloaded)
         error_detail = ("\nErrors:\n" + "\n".join(errors)) if errors else ""
-        regen_msg = regenerate_makefile_for_workspace(target) if ok else None
+        regen_msg = await _run_import_stage(
+            "makefile", asyncio.to_thread(regenerate_makefile_for_workspace, target), _ctx, timings_ms, stage_diagnostics,
+        ) if ok else None
+        duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
         text = (
             f"examples.import succeeded: {len(downloaded)} file(s) extracted to {target}"
-            f"{f'{chr(10)}{regen_msg}' if regen_msg else ''}"
+            f"{_build_readiness_note(target, regen_msg)}"
             if ok else
             f"examples.import failed: {len(downloaded)} extracted, {len(errors)} error(s).{error_detail}"
         )
         return ToolResult(
-            content=[TextContent(text=text)],
+            content=[TextContent(text=text + timing_note)],
             is_error=not ok,
-            structured_content={"ok": ok, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "downloaded": downloaded, "skipped": skipped_files, "errors": errors},
+            structured_content={"ok": ok, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, "downloaded": downloaded, "skipped": skipped_files, "errors": errors},
         )
 
     # Local filesystem
@@ -678,12 +931,16 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     example_dir = os.path.join(local_root, example["rootPath"])
     if not os.path.isdir(example_dir):
         raise FileNotFoundError(f"Example source directory not found: {example_dir}")
-    result = _copy_directory_recursive(example_dir, target, overwrite)
-    regen_msg = regenerate_makefile_for_workspace(target)
-    regen_suffix = f"\n{regen_msg}" if regen_msg else ""
+    result = await _run_import_stage(
+        "copy", asyncio.to_thread(_copy_directory_recursive, example_dir, target, overwrite), _ctx, timings_ms, stage_diagnostics,
+    )
+    regen_msg = await _run_import_stage(
+        "makefile", asyncio.to_thread(regenerate_makefile_for_workspace, target), _ctx, timings_ms, stage_diagnostics,
+    )
+    duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
     return ToolResult(
-        content=[TextContent(text=f"examples.import succeeded: {len(result['downloaded'])} file(s) copied to {target}{regen_suffix}")],
-        structured_content={"ok": True, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, **result},
+        content=[TextContent(text=f"examples.import succeeded: {len(result['downloaded'])} file(s) copied to {target}{_build_readiness_note(target, regen_msg)}{timing_note}")],
+        structured_content={"ok": True, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, **result},
     )
 
 
@@ -705,9 +962,12 @@ async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResul
     source_root = data.get("sourceRoot", "")
     gh = _resolve_github_source_root(source_root)
 
-    requested_files = args.get("files") if isinstance(args.get("files"), list) and args["files"] else (example.get("cpuMainFiles") or ["Cpu0_Main.c"])
+    explicit_files = isinstance(args.get("files"), list) and bool(args["files"])
+    requested_files = args["files"] if explicit_files else sorted(
+        example.get("cpuMainFiles") or ["Cpu0_Main.c"], key=_cpu_main_sort_key
+    )
 
-    results: list[dict[str, str]] = []
+    results: list[dict[str, Any]] = []
     for rel_file in requested_files:
         rel_file = str(rel_file)
         try:
@@ -741,9 +1001,19 @@ async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResul
             results.append({"file": rel_file, "content": "", "error": str(e)})
 
     success_count = sum(1 for r in results if "error" not in r)
+    if not explicit_files:
+        _apply_source_budget(results)
     total_chars = sum(len(r["content"]) for r in results)
     text = "\n\n".join(
-        f"=== {r['file']} ===\n{'ERROR: ' + r['error'] if 'error' in r else r['content']}"
+        f"=== {r['file']} ===\n"
+        + (
+            "ERROR: " + r["error"] if "error" in r
+            else r["content"] + (
+                f"\n... [truncated: {r['originalChars']} chars total, "
+                f"request this file explicitly via `files` to read more]"
+                if r.get("truncated") else ""
+            )
+        )
         for r in results
     )
 
@@ -758,6 +1028,7 @@ async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResul
             "totalChars": total_chars,
             "files": [
                 {"file": result["file"], "chars": len(result["content"]), "content": result["content"],
+                 **({"truncated": True, "originalChars": result["originalChars"]} if result.get("truncated") else {}),
                  **({"error": result["error"]} if "error" in result else {})}
                 for result in results
             ],

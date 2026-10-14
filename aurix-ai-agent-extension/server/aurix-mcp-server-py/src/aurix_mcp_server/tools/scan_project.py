@@ -30,6 +30,7 @@ ALWAYS_SKIP = {
 }
 
 DEFAULT_MAX_FILES = 5000
+MAX_LISTED_ROOT_SOURCES = 40
 
 
 def _scan_directory(
@@ -175,6 +176,7 @@ def _scan_project(
         "asmSources": asm_sources,
         "includeDirs": include_dirs,
         "linkerScripts": linker_scripts,
+        "hasMakefile": os.path.isfile(os.path.join(project_path, "Makefile")),
         "detectedDevice": device,
         "detectedIlldDir": illd_dir,
         "boardPins": resolve_board_pins(project_path, board),
@@ -220,14 +222,27 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             lines.append(f"Detected device: {result['detectedDevice']} (iLLD dir: {result['detectedIlldDir']})")
         lines.append(format_illd_version(result["illdVersion"]))
         lines.append(format_board_pins(result["boardPins"]))
+        if result["boardPins"]["status"] == "detected":
+            for pin in result["boardPins"]["pins"]:
+                lines.append(f"  {pin['pin']}: {', '.join(pin['aliases'])}")
+        lines.append(
+            "Makefile: present (try build.run; no scaffold needed solely for Makefile creation)"
+            if result["hasMakefile"] else
+            "Makefile: missing (run ads.create_project to generate it)"
+        )
         if result["excludedDirs"]:
             lines.append(f"Excluded: {', '.join(result['excludedDirs'])}")
         if result["linkerScripts"]:
             lines.append(f"Linker scripts: {', '.join(result['linkerScripts'])}")
+        root_sources = [f for f in result["cSources"] if "/" not in f]
+        if root_sources:
+            lines.append(f"Application sources (project root): {', '.join(root_sources[:MAX_LISTED_ROOT_SOURCES])}")
+        lines.append(
+            "Full file inventory omitted from this message; it is available in the "
+            "structured result under `scan` (cSources, includeDirs, asmSources)."
+        )
 
-        import json
-        text = "\n".join(lines) + "\n\n" + json.dumps(result, indent=2)
-        return ToolResult.text(text, structured={"scan": result})
+        return ToolResult.text("\n".join(lines), structured={"scan": result})
     except Exception as error:  # noqa: BLE001
         return ToolResult.text(f"project.scan failed: {safe_error_message(error)}", is_error=True)
 
