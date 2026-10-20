@@ -227,7 +227,6 @@ function registerAurixMcpProvider(context: vscode.ExtensionContext): void {
         spec.env ?? {},
         context.extension.packageJSON.version,
       );
-      try { def.cwd = vscode.Uri.file(spec.cwd); } catch { /* ignore */ }
       output?.appendLine(`[mcp] Registered: ${spec.command} ${spec.args.join(" ")}`);
       return [def];
     },
@@ -248,13 +247,17 @@ function registerAurixMcpProvider(context: vscode.ExtensionContext): void {
 function resolveMcpLaunchSpec(folder: vscode.WorkspaceFolder): {
   command: string;
   args: string[];
-  cwd: string;
   env?: Record<string, string>;
 } | undefined {
   const cfg = vscode.workspace.getConfiguration("aurix-ai-agent", folder.uri);
 
   // Pass the configured IDE path to the Python MCP server.
-  const baseEnv: Record<string, string> = {};
+  const baseEnv: Record<string, string> = {
+    AURIX_MCP_CWD: asAbsoluteUnderWorkspace(
+      folder,
+      resolveWorkspaceToken(folder, cfg.get<string>("mcpServerCwd", "${workspaceFolder}")),
+    ),
+  };
   const idePath = resolveIdePath(folder);
   if (idePath) {
     baseEnv.AURIX_ADS_STUDIO_PATH = idePath;
@@ -363,11 +366,9 @@ function resolveUvLaunchSpec(
 ): {
   command: string;
   args: string[];
-  cwd: string;
   env?: Record<string, string>;
 } | undefined {
   const serverDir = resolvePythonServerDir(folder);
-  const cwd = resolveWorkspaceToken(folder, cfg.get<string>("mcpServerCwd", "${workspaceFolder}"));
   const env: Record<string, string> = { ...baseEnv };
 
   // The bundled server ships as source; make it importable via PYTHONPATH.
@@ -388,20 +389,23 @@ function resolveUvLaunchSpec(
     args.push("--python", uvPython);
   }
 
-  // Allow custom module args; default to `python -m aurix_mcp_server`.
-  const argsConfig = cfg.get<string[]>("mcpServerArgs", []);
-  if (Array.isArray(argsConfig) && argsConfig.length > 0) {
-    args.push("python", ...argsConfig.map((v) => resolveWorkspaceToken(folder, v)));
-  } else {
-    args.push("python", "-m", PY_MODULE);
-  }
+  args.push("python", ...resolveMcpPythonArgs(folder, cfg));
 
   return {
     command: uvCommand,
     args,
-    cwd,
     env: Object.keys(env).length > 0 ? env : undefined,
   };
+}
+
+function resolveMcpPythonArgs(folder: vscode.WorkspaceFolder, cfg: vscode.WorkspaceConfiguration): string[] {
+  const args = ["-m", PY_MODULE];
+  const configured = cfg.get<string[]>("mcpServerArgs", []);
+  if (configured.length > 0) {
+    // Apply the working directory before Python resolves custom scripts/modules.
+    args.push("--python-args", ...configured.map((value) => resolveWorkspaceToken(folder, value)));
+  }
+  return args;
 }
 
 /** Build a launch spec for the Python MCP server (`python -m aurix_mcp_server`). */
@@ -412,7 +416,6 @@ function resolvePythonLaunchSpec(
 ): {
   command: string;
   args: string[];
-  cwd: string;
   env?: Record<string, string>;
 } | undefined {
   const configuredPython = cfg.get<string>("pythonPath", "python").trim() || "python";
@@ -425,16 +428,7 @@ function resolvePythonLaunchSpec(
   const env: Record<string, string> = { ...baseEnv };
 
   const serverDir = resolvePythonServerDir(folder);
-  const cwd = resolveWorkspaceToken(folder, cfg.get<string>("mcpServerCwd", "${workspaceFolder}"));
-
-  // Custom args override the default module launch.
-  const argsConfig = cfg.get<string[]>("mcpServerArgs", []);
-  let args: string[];
-  if (Array.isArray(argsConfig) && argsConfig.length > 0) {
-    args = argsConfig.map((v) => resolveWorkspaceToken(folder, v));
-  } else {
-    args = ["-m", PY_MODULE];
-  }
+  const args = resolveMcpPythonArgs(folder, cfg);
 
   // When the package is not pip-installed, prepend its src/ to PYTHONPATH so the
   // module is importable. Harmless when the package is already installed.
@@ -449,7 +443,6 @@ function resolvePythonLaunchSpec(
   return {
     command,
     args,
-    cwd,
     env: Object.keys(env).length > 0 ? env : undefined,
   };
 }
