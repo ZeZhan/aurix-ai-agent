@@ -12,15 +12,39 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import platform
+import subprocess
 import sys
 
 from . import PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION
-from .server_fastmcp import mcp
 
 
 def main() -> None:
+    cwd = os.environ.get("AURIX_MCP_CWD")
+    if cwd is not None:
+        if not os.path.isabs(cwd):
+            sys.stderr.write("AURIX_MCP_CWD must be an absolute directory path.\n")
+            raise SystemExit(1)
+        try:
+            os.chdir(cwd)
+        except OSError as exc:
+            sys.stderr.write(f"Cannot use AURIX_MCP_CWD {cwd!r}: {exc}\n")
+            raise SystemExit(1) from exc
+
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
+
+    if sub == "--python-args":
+        if len(sys.argv) < 3:
+            sys.stderr.write("--python-args requires Python interpreter arguments.\n")
+            raise SystemExit(1)
+        try:
+            # Inherit stdio unchanged so custom MCP entry points keep their transport.
+            result = subprocess.run([sys.executable, *sys.argv[2:]], check=False)
+        except OSError as exc:
+            sys.stderr.write(f"Cannot start custom MCP entry point: {exc}\n")
+            raise SystemExit(1) from exc
+        raise SystemExit(result.returncode)
 
     if sub in ("--help", "-h"):
         sys.stdout.write(
@@ -41,6 +65,9 @@ def main() -> None:
     if sub in ("--version", "-v"):
         sys.stdout.write(SERVER_VERSION + "\n")
         return
+
+    # FastMCP builds workspace instructions at import time.
+    from .server_fastmcp import mcp
 
     if sub in ("doctor", "--doctor"):
         tool_names = [t.name for t in asyncio.run(mcp.list_tools())]
