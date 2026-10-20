@@ -3,7 +3,7 @@
   "displayName": "AURIX™ AI Agent",
   "description": "AURIX™-native Copilot agent — generate, build, and flash TriCore™ from a single chat prompt.",
   "icon": "media/aurix-ai-icon.png",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "publisher": "zehuazhang",
   "license": "Apache-2.0",
   "repository": {
@@ -197,13 +197,13 @@
           "items": {
             "type": "string"
           },
-          "description": "Arguments passed to the Python interpreter. If empty, the extension uses -m aurix_mcp_server."
+          "description": "Arguments passed to a Python interpreter after the AURIX launcher sets mcpServerCwd. If empty, the extension starts the bundled MCP server directly."
         },
         "aurix-ai-agent.mcpServerCwd": {
           "type": "string",
           "default": "${workspaceFolder}",
           "scope": "resource",
-          "description": "Working directory for MCP server process."
+          "description": "Working directory applied by the AURIX launcher via AURIX_MCP_CWD (no MCP cwd field required). Relative paths resolve under the workspace folder. Supports ${workspaceFolder}, ${workspaceRoot}, ${extensionPath}."
         },
         "aurix-ai-agent.installCopilotInstructions": {
           "type": "boolean",
