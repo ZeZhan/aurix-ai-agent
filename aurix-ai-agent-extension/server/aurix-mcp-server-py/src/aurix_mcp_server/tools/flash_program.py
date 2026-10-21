@@ -94,6 +94,8 @@ def _studio_tool_dir_globs(root: str) -> list[str]:
         os.path.join(root, "tools", "AurixFlasherSoftwareTool_*"),
         os.path.join(root, "eclipse", "plugins", "com.ifx.ads2.flash_*", "AurixFlasherSoftwareTool_*"),
         os.path.join(root, "plugins", "com.ifx.ads2.flash_*", "AurixFlasherSoftwareTool_*"),
+        os.path.join(root, "eclipse", "plugins", "com.ifx.ads2.flash_*", "AurixFlasherSoftwareTool", "*"),
+        os.path.join(root, "plugins", "com.ifx.ads2.flash_*", "AurixFlasherSoftwareTool", "*"),
         os.path.join(root, "plugins", "com.rt.hightec.tcf.agent.launcher_*"),
         os.path.join(root, "eclipse", "plugins", "com.rt.hightec.tcf.agent.launcher_*"),
         os.path.join(root, "tools", "*"),
@@ -128,10 +130,13 @@ def _probe_known_flasher_locations(
     # Fall back to AURIX IDE install trees under C:\Infineon:
     #    - AurixFlasher (AURIX Development Studio):   <root>\tools\AurixFlasherSoftwareTool_*\
     #    - AurixFlasher (AURIX Configuration Studio): <root>\eclipse\plugins\com.ifx.ads2.flash_*\AurixFlasherSoftwareTool_*\
+    #    - ACS 1.0.24+: <root>[\eclipse]\plugins\com.ifx.ads2.flash_*\AurixFlasherSoftwareTool\<version>\
     #    - lsmcdd (both studios): <root>[\eclipse]\plugins\com.rt.hightec.tcf.agent.launcher_*\res\
     tool_dir_globs.extend([
         "C:\\Infineon\\*\\tools\\AurixFlasherSoftwareTool_*",
         "C:\\Infineon\\*\\eclipse\\plugins\\com.ifx.ads2.flash_*\\AurixFlasherSoftwareTool_*",
+        "C:\\Infineon\\*\\eclipse\\plugins\\com.ifx.ads2.flash_*\\AurixFlasherSoftwareTool\\*",
+        "C:\\Infineon\\*\\plugins\\com.ifx.ads2.flash_*\\AurixFlasherSoftwareTool\\*",
         "C:\\Infineon\\*\\plugins\\com.rt.hightec.tcf.agent.launcher_*",
         "C:\\Infineon\\*\\eclipse\\plugins\\com.rt.hightec.tcf.agent.launcher_*",
         "C:\\Infineon\\*\\tools\\*",
@@ -461,6 +466,5 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         return await _run_flash_aurixflasher(workspace_root, args, timeout_ms, ctx)
     except Exception as error:  # noqa: BLE001
         return ToolResult.text(f"flash.program error: {safe_error_message(error)}", is_error=True)
-
 
 
