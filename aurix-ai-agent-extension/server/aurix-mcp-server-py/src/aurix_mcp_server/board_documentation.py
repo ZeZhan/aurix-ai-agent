@@ -1,4 +1,4 @@
-"""Scoped, reviewed board facts exposed through documentation.search."""
+"""Scoped, reviewed board facts exposed through documentation_search."""
 
 from __future__ import annotations
 
@@ -7,10 +7,28 @@ from pathlib import Path
 from typing import Any
 
 from .board_pins import BOARD_ALIASES, normalize_board, resolve_board_pins, selected_board
+from .connected_devices import detected_hardware_version
 from .documentation_retrieval import board_signal_facts, hardware_version_matches, search_results
 
 
 BOARD_INDEX = Path(__file__).parent / "data" / "board_manuals" / "boards.sqlite"
+# Unreviewed manual text lives in a separate index so that a server running older
+# code (e.g. before an MCP restart after an update) can never mistake it for facts.
+BOARD_TEXT_INDEX = Path(__file__).parent / "data" / "board_manual_text" / "board-text.sqlite"
+MANUAL_TEXT_MAX_RESULTS = 5
+# Manual text of the matching board revision may drive code generation when the page is cited;
+# without a known revision the agent must establish it first (detection, then the user).
+BOARD_TEXT_CITE_PAGE = "cite_board_manual_page"
+BOARD_TEXT_VERSION_REQUIRED = "board_hardware_version_required"
+BOARD_TEXT_GUIDANCE = (
+    "Board-manual text for the matching board hardware revision: use it for code generation without asking "
+    "the user to confirm; cite document, revision and physical page in a code comment. Prefer the project BPL "
+    "for pin numbers and report a conflict. Schematics and pin-header figures are not indexed."
+)
+BOARD_TEXT_VERSION_GUIDANCE = (
+    "Board hardware revision unknown: call flash_list_devices; ask the user for the board revision only if "
+    "no matching kit is connected."
+)
 SIGNAL_PATTERN = re.compile(
     r"(?<![a-z0-9])(?:leds?\d*|buttons?\d*|[ds]\d+|reset|wake)(?![a-z0-9])"
     r"|P\d{1,2}\.\d{1,2}(?!\d)|\u6309\u94ae|\u6309\u952e|\u706f|\u590d\u4f4d|\u5524\u9192",
@@ -69,6 +87,33 @@ def _signal_query(query: str, facts: list[dict]) -> str:
 def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, Any] | None:
     if not SIGNAL_PATTERN.search(query):
         return None
+    unambiguous_signal = re.search(
+        r"\b(?:leds?\d*|buttons?\d*|[ds]\d+)\b|P\d{1,2}\.\d{1,2}(?!\d)"
+        r"|\u6309\u94ae|\u6309\u952e|\u706f", query, re.IGNORECASE,
+    )
+    physical_signal = re.search(
+        r"\b(?:buttons?|switch(?:es)?|pins?|wir(?:e|ed|ing)|connect(?:ed|ion)?|"
+        r"schematic|polarity|active[- ](?:low|high))\b", query, re.IGNORECASE,
+    )
+    module_operation = re.search(
+        r"\b(?:module|channel|registers?|software|interrupt|dma|stm|can|qspi|"
+        r"peripheral|application|system|cold|warm)\b", query, re.IGNORECASE,
+    )
+    named_board = _board_in_text(query) or args.get("board") or _board_in_text(args.get("device") or "")
+    if not unambiguous_signal and not physical_signal and (module_operation or not named_board):
+        return None
+    board_signal = re.search(
+        r"\b(?:leds?\d*|buttons?\d*|[ds]\d+|switch(?:es)?|polarity|active[- ](?:low|high))\b"
+        r"|\u6309\u94ae|\u6309\u952e|\u706f", query, re.IGNORECASE,
+    )
+    on_chip_function = re.search(
+        r"\b[A-Z][A-Z0-9]*\d*_[A-Z0-9_]+\b|\balt(?:ernate)?\b|\b(?:i2c|asclin|qspi|can|gtm|tom|atom|ccu6|"
+        r"evadc|vadc|gpt12|eray|sent|psi5|msc|geth|eth)\d*\b", query, re.IGNORECASE,
+    )
+    # A port pin named together with an on-chip function is a pin-multiplexing
+    # question for the chip manuals, not a board wiring lookup.
+    if on_chip_function and not board_signal and not named_board:
+        return None
     chip_configuration = re.search(r"\b(?:gpio|registers?|padcfg\w*|gtm|egtm|pwm)\b", query, re.IGNORECASE)
     board_specific = re.search(
         r"(?:led|button|[ds])\s*\d+|reset|wake|polarity|active|\u590d\u4f4d|\u5524\u9192|\u6709\u6548\u7535\u5e73|\u6781\u6027", query, re.IGNORECASE,
@@ -110,11 +155,16 @@ def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, An
             pins = {**pins, "status": "conflict", "reason": "BPL and requested hardware revisions differ"}
         elif declared_version and (not hardware_version or hardware_version.endswith(".x")):
             hardware_version = _hardware_version(declared_version)
+    detected = None if hardware_version else detected_hardware_version(board)
+    if detected:
+        hardware_version = _hardware_version(detected["hardwareVersion"])
     payload = {
         "scope": "board", "board": board, "hardwareVersion": hardware_version,
         "supportedFields": ["pin", "active_level"], "results": [],
         "requiresConfirmation": False,
     }
+    if detected:
+        payload["hardwareVersionDetected"] = detected
     if pins is not None:
         payload["boardPins"] = pins
     if not board:
@@ -122,7 +172,7 @@ def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, An
         return payload
     if UNREVIEWED_PATTERN.search(query):
         payload["reason"] = "outside_reviewed_pin_and_active_level_scope"
-        return payload
+        return _with_manual_text(payload, args, query, top_k)
     if pins and pins["status"] in {"invalid", "conflict"}:
         payload["reason"] = "project_bpl_" + pins["status"]
         return payload
@@ -130,10 +180,13 @@ def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, An
     if not database.is_file():
         raise FileNotFoundError(f"Board documentation index not found: {database}")
     signal_query = _signal_query(query, board_signal_facts(database, board))
+    # Manual-text chunks share the board scope; the reviewed-fact path keeps only fact chunks.
     results = search_results(
-        database, signal_query, limit=top_k, board=board, hardware_version=hardware_version,
+        database, signal_query, limit=max(top_k * 3, 10), board=board, hardware_version=hardware_version,
     ) if signal_query else []
-    results = [result for result in results if result["citation"].get("board") == board]
+    results = [
+        result for result in results if result["citation"].get("board") == board and result.get("facts")
+    ][:top_k]
     for result in results:
         non_gpio = any(fact.get("gpio") is False for fact in result["facts"])
         result["bplCheck"] = "not_checked" if pins is None else pins["status"]
@@ -167,4 +220,67 @@ def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, An
     payload["requiresConfirmation"] = any(not result["usableForCodeGeneration"] for result in results)
     if not results:
         payload["reason"] = "no_supported_board_evidence"
+        return _with_manual_text(payload, args, query, top_k)
+    return payload
+
+
+def explicit_board(args: dict[str, Any], query: str) -> str | None:
+    """Board named in the query or arguments; workspace selection is not used."""
+    try:
+        requested = {value for value in (
+            _board_in_text(query), normalize_board(args.get("board")), _board_in_text(args.get("device") or ""),
+        ) if value}
+    except ValueError:
+        return None
+    return next(iter(requested)) if len(requested) == 1 else None
+
+
+def query_hardware_version(args: dict[str, Any], query: str) -> str | None:
+    hardware_version = _hardware_version(args.get("hardwareVersion"))
+    query_versions = {version.lower() for version in re.findall(
+        r"(?<![a-z0-9])(?:v|hw|hardware\s+version)\s*(\d+(?:\.\d+)*(?:\.x)?)(?![a-z0-9.])", query, re.IGNORECASE,
+    )}
+    if len(query_versions) > 1 or (hardware_version and query_versions and hardware_version not in query_versions):
+        raise ValueError("hardwareVersion and query refer to different hardware revisions")
+    return hardware_version or next(iter(query_versions), None)
+
+
+def board_manual_text(
+    args: dict[str, Any], query: str, top_k: int, board: str, hardware_version: str | None,
+) -> list[dict[str, Any]]:
+    """Board-manual text for one board; code-generation ready (with a page citation) only for a known revision."""
+    database = Path(args["indexPath"]).expanduser().resolve() if args.get("indexPath") else BOARD_TEXT_INDEX
+    if not database.is_file():
+        return []
+    results = search_results(
+        database, query, limit=top_k, board=board, hardware_version=hardware_version, veto_unknown_anchors=False,
+    )
+    text = [result for result in results if result["citation"].get("board") == board and not result.get("facts")]
+    # Results are already filtered to the requested revision; a wildcard revision is not a known one.
+    known = bool(hardware_version) and not hardware_version.lower().endswith(".x")
+    for result in text:
+        result["applicability"] = "board_manual_text" if known else "hardware_version_required"
+        result["usableForCodeGeneration"] = known
+        result["usageRestriction"] = BOARD_TEXT_CITE_PAGE if known else BOARD_TEXT_VERSION_REQUIRED
+        result["bplCheck"] = "not_applicable"
+    return text
+
+
+def board_text_guidance(results: list[dict[str, Any]]) -> str | None:
+    restrictions = {result.get("usageRestriction") for result in results}
+    guidance = []
+    if BOARD_TEXT_CITE_PAGE in restrictions:
+        guidance.append(BOARD_TEXT_GUIDANCE)
+    if BOARD_TEXT_VERSION_REQUIRED in restrictions:
+        guidance.append(BOARD_TEXT_VERSION_GUIDANCE)
+    return " ".join(guidance) or None
+
+
+def _with_manual_text(payload: dict[str, Any], args: dict[str, Any], query: str, top_k: int) -> dict[str, Any]:
+    # Manual-text excerpts are large; keep them within the text-excerpt cap even when more facts were requested.
+    text = board_manual_text(args, query, min(top_k, MANUAL_TEXT_MAX_RESULTS), payload["board"], payload["hardwareVersion"])
+    if text:
+        payload["results"] = text
+        payload["requiresConfirmation"] = any(not result["usableForCodeGeneration"] for result in text)
+        payload["evidenceStatus"] = "board_manual_text"
     return payload

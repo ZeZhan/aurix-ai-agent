@@ -1,4 +1,4 @@
-"""MCP tool: flash.program
+"""MCP tool: flash_program
 
 Program an ELF image via aurixflasher.exe (resolves device id via lsmcdd when
 available). Also supports an arbitrary shell command mode.
@@ -30,7 +30,7 @@ DEFAULT_TIMEOUT_MS = 180_000
 
 def _parse_input(args: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(args, dict):
-        raise ValueError("flash.program requires an object argument")
+        raise ValueError("flash_program requires an object argument")
     return args
 
 
@@ -295,9 +295,9 @@ async def _run_flash_command(
     ok = (not timed_out) and exit_code == 0
 
     text = (
-        f"flash.program command succeeded (exitCode={exit_code})"
+        f"flash_program command succeeded (exitCode={exit_code})"
         if ok else
-        f"flash.program command failed (exitCode={exit_code}, timedOut={str(timed_out).lower()})"
+        f"flash_program command failed (exitCode={exit_code}, timedOut={str(timed_out).lower()})"
     )
 
     return ToolResult(
@@ -404,16 +404,16 @@ async def _run_flash_aurixflasher(
     stdout = (stdout_bytes or b"").decode("utf-8", errors="replace")
     stderr_parts = [s for s in [
         (stderr_bytes or b"").decode("utf-8", errors="replace"),
-        "flash.program timed out" if timed_out else "",
+        "flash_program timed out" if timed_out else "",
     ] if s.strip()]
 
     ok = exit_code == 0
     stderr_text = "\n".join([*warnings, *stderr_parts]).strip()
 
     text = (
-        "flash.program completed successfully."
+        "flash_program completed successfully."
         if ok else
-        f"flash.program failed with code {'null' if exit_code is None else exit_code}"
+        f"flash_program failed with code {'null' if exit_code is None else exit_code}"
     )
 
     return ToolResult(
@@ -457,7 +457,7 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             discovered = _autodiscover_image(workspace_root)
             if not discovered:
                 raise ValueError(
-                    "flash.program requires image or command: no .elf found under "
+                    "flash_program requires image or command: no .elf found under "
                     f"{os.path.join(workspace_root, 'build')} or {workspace_root}. "
                     "Build the project first or pass image explicitly."
                 )
@@ -465,6 +465,6 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
 
         return await _run_flash_aurixflasher(workspace_root, args, timeout_ms, ctx)
     except Exception as error:  # noqa: BLE001
-        return ToolResult.text(f"flash.program error: {safe_error_message(error)}", is_error=True)
+        return ToolResult.text(f"flash_program error: {safe_error_message(error)}", is_error=True)
 
 

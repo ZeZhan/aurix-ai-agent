@@ -40,6 +40,55 @@ enable **`aurix-mcp-server`**, and enter your request.
 No Python or uv installation is needed. The Windows x64 VSIX includes uv and
 downloads an isolated Python runtime with tested MCP packages on first use.
 
+## Build and deploy a local update
+
+From the repository root:
+
+```powershell
+Push-Location .\aurix-ai-agent-extension
+npm run build
+Pop-Location
+
+# Test the server that will actually be bundled, using synthetic chip fixtures.
+# Clear production-index overrides in this test shell to avoid live-index tests.
+$env:AURIX_DOCUMENTATION_INDEX_DIR = $null
+$env:AURIX_DOCUMENTATION_INDEX = $null
+.\.venv\Scripts\python.exe .\aurix-mcp-server-py\tests\smoke_stdio.py `
+  --server-src .\aurix-ai-agent-extension\server\aurix-mcp-server-py\src
+```
+
+The test uses the repository development virtual environment. It checks MCP
+tool discovery, documentation search/read pagination, reviewed board facts,
+project scanning, and synthetic import/build operations; it does not flash
+hardware. `npm run build` compiles TypeScript and copies skill templates, but
+does **not** create a VSIX, update the installed extension, or synchronize the
+standalone Python source into the bundled server. The documentation regression
+suite checks parity of the four documentation-related source/bundled modules.
+
+Only in an environment authorized to read and package **all** bundled data:
+
+```powershell
+Push-Location .\aurix-ai-agent-extension
+npm run package
+if ($LASTEXITCODE -eq 0) {
+    code --install-extension .\aurix-ai-agent-extension-win32-x64.vsix --force
+}
+Pop-Location
+```
+
+Packaging requires the bundled documentation indexes and example catalogs,
+VSCE, and the trusted uv binary/version/hash checked by
+[the packaging script](scripts/package-vsix.js). Do not omit restricted indexes
+to produce a misleading partial release, and do not install an older VSIX as if
+it contained the new build.
+
+After a successful installation, reload the VS Code window and restart the
+AURIX MCP server through the MCP server controls. In Copilot's tool list, verify
+that both `documentation_search` and `documentation_read` are exposed. A tool
+list check establishes deployment, not engineering-answer quality; run the
+frozen TC375 documentation evaluation separately
+when authorized index access is available.
+
 ## Setup (2 things)
 
 Configure via the Configurator panel or VS Code Settings (`aurix-ai-agent.*`).

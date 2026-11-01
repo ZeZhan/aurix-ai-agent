@@ -63,13 +63,15 @@ Copilot calls these AURIX MCP tools automatically when relevant:
 
 | Tool | What it does |
 |---|---|
-| `ads.create_project` | Create an iLLD project (Makefile + linker + startup) |
-| `build.run` | Build with the free GCC compiler (finds it on PATH for you) |
-| `flash.program` | Flash `.elf` / `.hex` to the board over USB with AURIX Flasher |
-| `examples.search` · `examples.import` · `examples.read_source` | Find, inspect, and import public iLLD code examples |
-| `documentation.search` | Search bundled TC2xx/TC3xx/TC4Dx documentation with device-aware routing and physical PDF page citations |
-| `illd.provision` | Install / update the public iLLD driver library |
-| `project.scan` | Look at the workspace structure |
+| `ads_create_project` | Create an iLLD project (Makefile + linker + startup) |
+| `build_run` | Build with the free GCC compiler (finds it on PATH for you) |
+| `flash_program` | Flash `.elf` / `.hex` to the board over USB with AURIX Flasher |
+| `flash_list_devices` | List connected kits (`AURIXFlasher -detect all`): chip, board ID, board hardware version; used to fill in the board revision for board documentation |
+| `examples_search` · `examples_import` · `examples_read_source` | Find, inspect, and import public iLLD code examples |
+| `documentation_search` | Search bundled TC2xx/TC3xx/TC4Dx documentation with device-aware routing and physical PDF page citations |
+| `documentation_read` | Read or continue cited source chunks when search evidence is truncated |
+| `illd_provision` | Install / update the public iLLD driver library |
+| `project_scan` | Look at the workspace structure |
 
 ---
 

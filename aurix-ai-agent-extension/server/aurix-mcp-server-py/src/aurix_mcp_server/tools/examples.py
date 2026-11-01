@@ -1,4 +1,4 @@
-"""MCP tools: examples.search, examples.import, examples.read_source
+"""MCP tools: examples_search, examples_import, examples_read_source
 
 Search, import (download), and read AURIX code examples from the indexed
 catalog. Supports: local filesystem, zip archives (via Python zipfile), and
@@ -25,6 +25,7 @@ from urllib.error import HTTPError, URLError
 import httpx
 
 from .ads_create_project import regenerate_makefile_for_workspace
+from ..illd_version import format_illd_version, quick_illd_version
 from ..tooldef import TextContent, ToolContext, ToolResult
 from ..utils import safe_error_message
 
@@ -131,8 +132,18 @@ def _summarize_text(value: str, max_chars: int) -> str:
 def _build_readiness_note(target: str, regen_msg: Optional[str]) -> str:
     if os.path.isfile(os.path.join(target, "Makefile")):
         detail = f"\n{regen_msg}" if regen_msg else ""
-        return detail + "\nMakefile: present (try build.run; no scaffold needed solely for Makefile creation)."
-    return "\nNo Makefile was generated: call ads.create_project for this device before build.run."
+        return detail + "\nMakefile: present (try build_run; no scaffold needed solely for Makefile creation)."
+    return "\nNo Makefile was generated: call ads_create_project for this device before build_run."
+
+
+def _illd_note(target: str, files: list[str], example_id: str) -> tuple[str, Optional[dict[str, Any]]]:
+    """Which iLLD the project now uses and where it came from."""
+    version = quick_illd_version(target)
+    if version is None:
+        return "\niLLD: none in the project yet (ads_create_project deploys the selected IDE's iLLD).", None
+    bundled = any(re.search(r"(?:^|[\\/])Libraries[\\/]iLLD[\\/]", str(path)) for path in files)
+    origin = f"bundled with example {example_id}" if bundled else "already in the project (the example ships no iLLD)"
+    return f"\n{format_illd_version(version)}; source: {origin}.", version
 
 
 def _cpu_main_sort_key(rel_file: str) -> tuple[int, str]:
@@ -647,7 +658,7 @@ def _read_text_from_zip(zip_path: str, internal_path: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# examples.search
+# examples_search
 # ---------------------------------------------------------------------------
 
 async def _search_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
@@ -694,7 +705,7 @@ async def _search_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 
 
 # ---------------------------------------------------------------------------
-# examples.import
+# examples_import
 # ---------------------------------------------------------------------------
 
 async def _run_import_stage(
@@ -714,7 +725,7 @@ async def _run_import_stage(
         send_started = time.monotonic()
         metrics["progressSendCount"] += 1
         try:
-            await ctx.send_progress(f"examples.import: {message}", "stdout")
+            await ctx.send_progress(f"examples_import: {message}", "stdout")
         except Exception:
             pass
         finally:
@@ -808,9 +819,9 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     example_id = args.get("id", "").strip()
     target_dir = args.get("targetDir", "").strip()
     if not example_id:
-        raise ValueError("examples.import requires id")
+        raise ValueError("examples_import requires id")
     if not target_dir:
-        raise ValueError("examples.import requires targetDir")
+        raise ValueError("examples_import requires targetDir")
 
     started_at = time.monotonic()
     timings_ms: dict[str, int] = {}
@@ -852,10 +863,10 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         ) if ok else None
         duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
         text = (
-            f"examples.import succeeded: {len(result['downloaded'])} file(s) downloaded to {target}"
+            f"examples_import succeeded: {len(result['downloaded'])} file(s) downloaded to {target}"
             f"{_build_readiness_note(target, regen_msg)}"
             if ok else
-            f"examples.import failed: {len(result['downloaded'])} downloaded, {len(result['errors'])} error(s).{error_detail}"
+            f"examples_import failed: {len(result['downloaded'])} downloaded, {len(result['errors'])} error(s).{error_detail}"
             f"{'\nHint: This is likely a GitHub API rate limit (60 req/hr unauthenticated). Try again later or download manually from https://github.com/Infineon/AURIX_code_examples.' if not result['downloaded'] else ''}"
         )
         return ToolResult(
@@ -914,16 +925,17 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             "makefile", asyncio.to_thread(regenerate_makefile_for_workspace, target), _ctx, timings_ms, stage_diagnostics,
         ) if ok else None
         duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
+        illd_text, illd_version = _illd_note(target, downloaded, example["id"]) if ok else ("", None)
         text = (
-            f"examples.import succeeded: {len(downloaded)} file(s) extracted to {target}"
-            f"{_build_readiness_note(target, regen_msg)}"
+            f"examples_import succeeded: {len(downloaded)} file(s) extracted to {target}"
+            f"{_build_readiness_note(target, regen_msg)}{illd_text}"
             if ok else
-            f"examples.import failed: {len(downloaded)} extracted, {len(errors)} error(s).{error_detail}"
+            f"examples_import failed: {len(downloaded)} extracted, {len(errors)} error(s).{error_detail}"
         )
         return ToolResult(
             content=[TextContent(text=text + timing_note)],
             is_error=not ok,
-            structured_content={"ok": ok, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, "downloaded": downloaded, "skipped": skipped_files, "errors": errors},
+            structured_content={"ok": ok, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "illdVersion": illd_version, "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, "downloaded": downloaded, "skipped": skipped_files, "errors": errors},
         )
 
     # Local filesystem
@@ -938,20 +950,21 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         "makefile", asyncio.to_thread(regenerate_makefile_for_workspace, target), _ctx, timings_ms, stage_diagnostics,
     )
     duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
+    illd_text, illd_version = _illd_note(target, result.get("downloaded", []), example["id"])
     return ToolResult(
-        content=[TextContent(text=f"examples.import succeeded: {len(result['downloaded'])} file(s) copied to {target}{_build_readiness_note(target, regen_msg)}{timing_note}")],
-        structured_content={"ok": True, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, **result},
+        content=[TextContent(text=f"examples_import succeeded: {len(result['downloaded'])} file(s) copied to {target}{_build_readiness_note(target, regen_msg)}{illd_text}{timing_note}")],
+        structured_content={"ok": True, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "illdVersion": illd_version, "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, **result},
     )
 
 
 # ---------------------------------------------------------------------------
-# examples.read_source
+# examples_read_source
 # ---------------------------------------------------------------------------
 
 async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     example_id = (args.get("id") or "").strip()
     if not example_id:
-        raise ValueError("examples.read_source requires id")
+        raise ValueError("examples_read_source requires id")
 
     index_path_arg = args.get("indexPath")
     _, data = _load_examples_index(index_path_arg)

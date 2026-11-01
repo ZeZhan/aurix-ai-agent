@@ -69,6 +69,8 @@ const requiredFiles = [
   path.join(extensionRoot, "server", "aurix-mcp-server-py", "data", "documentation", "aurix-tc2xx.sqlite"),
   path.join(extensionRoot, "server", "aurix-mcp-server-py", "data", "documentation", "aurix-tc3xx.sqlite"),
   path.join(extensionRoot, "server", "aurix-mcp-server-py", "data", "documentation", "aurix-tc4dx.sqlite"),
+  path.join(extensionRoot, "server", "aurix-mcp-server-py", "src", "aurix_mcp_server", "data", "board_manuals", "boards.sqlite"),
+  path.join(extensionRoot, "server", "aurix-mcp-server-py", "src", "aurix_mcp_server", "data", "board_manual_text", "board-text.sqlite"),
   path.join(extensionRoot, "server", "aurix-mcp-server-py", "examples.index.json"),
   path.join(extensionRoot, "server", "aurix-mcp-server-py", "examples.manifest.json.gz"),
   bundledUvPath,

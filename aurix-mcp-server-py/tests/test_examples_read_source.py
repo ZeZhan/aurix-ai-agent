@@ -120,7 +120,7 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
         for message in (None, "Generator returned a status"):
             note = examples._build_readiness_note(str(self.root), message)
             self.assertIn("No Makefile was generated", note)
-            self.assertNotIn("try build.run", note)
+            self.assertNotIn("try build_run", note)
         (self.root / "Makefile").write_text("all:\n", encoding="utf-8")
         for message in (None, "Regenerated Makefile"):
             note = examples._build_readiness_note(str(self.root), message)
@@ -432,11 +432,11 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.isError)
         self.assertTrue(context.report_progress.await_count)
         messages = [call.args[2] for call in context.report_progress.await_args_list]
-        self.assertIn("examples.import: index started", messages)
-        self.assertIn("examples.import: download started", messages)
-        self.assertIn("examples.import: makefile started", messages)
+        self.assertIn("examples_import: index started", messages)
+        self.assertIn("examples_import: download started", messages)
+        self.assertIn("examples_import: makefile started", messages)
         self.assertTrue(any("makefile completed" in message for message in messages))
-        self.assertLess(messages.index("examples.import: download started"), messages.index("examples.import: makefile started"))
+        self.assertLess(messages.index("examples_import: download started"), messages.index("examples_import: makefile started"))
         self.assertTrue(context.info.await_count)
 
     async def test_slow_makefile_sends_heartbeat_before_work_finishes(self) -> None:
@@ -570,7 +570,7 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
             result = await examples_import(id="TC375_Blinky", targetDir=str(self.root / "failed"))
         self.assertTrue(result.isError)
         self.assertIn("connection failed", result.content[0].text)
-        self.assertNotIn("try build.run", result.content[0].text)
+        self.assertNotIn("try build_run", result.content[0].text)
         self.assertIn("download", result.structuredContent["timingsMs"])
         self.assertNotIn("makefile", result.structuredContent["timingsMs"])
         regenerate.assert_not_called()

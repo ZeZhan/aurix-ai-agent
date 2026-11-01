@@ -9,15 +9,15 @@
 
 | 工具 | 用途 |
 |------|------|
-| `ads.create_project` | 创建 AURIX 项目 |
-| `build.run` | 构建项目 |
-| `flash.program` | 烧录固件 |
-| `illd.provision` | 添加所需的 iLLD 源码 |
-| `project.scan` | 查看项目结构、iLLD 版本和可用的板级引脚标签 |
-| `examples.search` | 查找 AURIX 示例 |
-| `examples.import` | 将示例导入工作区 |
-| `examples.read_source` | 查看示例源码 |
-| `documentation.search` | 检索 AURIX 文档并提供来源引用 |
+| `ads_create_project` | 创建 AURIX 项目 |
+| `build_run` | 构建项目 |
+| `flash_program` | 烧录固件 |
+| `illd_provision` | 添加所需的 iLLD 源码 |
+| `project_scan` | 查看项目结构、iLLD 版本和可用的板级引脚标签 |
+| `examples_search` | 查找 AURIX 示例 |
+| `examples_import` | 将示例导入工作区 |
+| `examples_read_source` | 查看示例源码 |
+| `documentation_search` | 检索 AURIX 文档并提供来源引用 |
 
 ## 使用
 

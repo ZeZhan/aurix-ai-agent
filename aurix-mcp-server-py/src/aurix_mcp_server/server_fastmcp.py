@@ -15,6 +15,7 @@ Run:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any, Literal, Optional
@@ -23,10 +24,12 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent as MCPTextContent, ToolAnnotations
 
 from . import SERVER_NAME, SERVER_VERSION
+from .connected_devices import detect_connected_devices
 from .tooldef import RiskLevel, ToolContext, ToolResult
 from .tools.ads_create_project import _run as ads_create_project_run
 from .tools.build_run import _run as build_run_run
 from .tools.documentation_search import _run as documentation_search_run
+from .tools.documentation_search import _read_run as documentation_read_run
 from .tools.examples import _import_run, _read_source_run, _search_run
 from .tools.flash_program import _run as flash_program_run
 from .tools.illd_provision import _run as illd_provision_run
@@ -163,7 +166,7 @@ mcp = FastMCP(SERVER_NAME, instructions=build_instructions())
 
 
 @mcp.tool(
-    name="ads.create_project",
+    name="ads_create_project",
     description=(
         "Create a device project template from the local ADS installation. "
         "Extracts iLLD libraries, configuration files, linker scripts, and source stubs "
@@ -188,11 +191,12 @@ async def ads_create_project(
 
 
 @mcp.tool(
-    name="build.run",
+    name="build_run",
     description=(
         "Build an AURIX project with auto-detected tricore-gcc and make. "
-        "For a normal build, pass workspace only and omit command; command is reserved "
-        "for an actual custom shell command. Results include bounded diagnostic previews; "
+        "For a normal build, pass workspace only and omit command and timeoutMs; command is reserved "
+        "for an actual custom shell command. A first full build compiles the iLLD and can take several "
+        "minutes (default timeout 10 min). Results include bounded diagnostic previews; "
         "logFiles points to full stdout/stderr logs when more context is needed."
     ),
     annotations=_ann("write"),
@@ -214,7 +218,7 @@ async def build_run(
         workspace: Workspace folder path. Default: context workspace or current working directory.
         cwd: Working directory for the build. Relative values are resolved against workspace.
         pathAdditions: Directories to prepend to PATH. Auto-detects tricore-gcc/make when omitted.
-        timeoutMs: Build timeout in milliseconds.
+        timeoutMs: Optional; omit it. Default 10 minutes; values below 5 minutes are raised to 5 minutes.
         shell: Run via shell. Default: true.
     """
     args = _clean(
@@ -225,7 +229,7 @@ async def build_run(
 
 
 @mcp.tool(
-    name="examples.import",
+    name="examples_import",
     description=(
         "Import (download) a complete AURIX code example from the GitHub repository "
         "into a local target directory. Reports hasMakefile after attempting regeneration; "
@@ -253,7 +257,7 @@ async def examples_import(
 
 
 @mcp.tool(
-    name="examples.read_source",
+    name="examples_read_source",
     description=(
         "Read source code files of an AURIX code example. Default CPU-main previews "
         "are budgeted, CPU0 first, with truncation metadata. Pass files explicitly "
@@ -279,7 +283,7 @@ async def examples_read_source(
 
 
 @mcp.tool(
-    name="examples.search",
+    name="examples_search",
     description=(
         "Search the indexed Infineon AURIX code examples catalog by query, board, "
         "family, or keyword."
@@ -312,10 +316,17 @@ async def examples_search(
 
 
 @mcp.tool(
-    name="documentation.search",
+    name="documentation_search",
     description=(
         "Search the generation-appropriate offline AURIX documentation SQLite index. "
-        "Returns evidence excerpts with document metadata and physical PDF page citations. "
+        "Returns one focused excerpt per hit with physical PDF page citations. Keep topK small "
+        "(default 3, maximum 5 text excerpts; reviewed board LED/button facts up to 10) and use short "
+        "keyword queries. When an excerpt is cut and you need the "
+        "rest of a table, footnote or register description, call documentation_read with the chunkId "
+        "shown instead of searching again with a larger topK. "
+        "Nonempty results do not prove answer sufficiency: verify conditions, device applicability and errata. "
+        "Long questions are automatically re-searched per clause with keyword follow-up queries (marked "
+        "follow-up); uncoveredTerms lists question identifiers absent from all returned text. "
         "Specify device/family when the query does not identify the target. "
         "For reviewed board LED/button pins and polarity, provide board and hardwareVersion. "
         "Optional projectPath checks these facts against the project's BPL; unresolved scope or conflicts must not be used to generate code."
@@ -336,7 +347,7 @@ async def documentation_search(
 
     Args:
         query: Technical question or search terms.
-        topK: Maximum results to return. Values above 10 are clamped to 10.
+        topK: Maximum results to return (default 3). Text excerpts are clamped to 5; reviewed board LED/button facts to 10.
         indexPath: Path to the offline SQLite index. Overrides AURIX_DOCUMENTATION_INDEX.
         device: Target device or board, for example TC375 or KIT_A2G_TC375_LITE.
         family: Target generation, for example TC2xx, TC3xx, or TC4Dx.
@@ -344,13 +355,39 @@ async def documentation_search(
         hardwareVersion: Hardware revision, for example V2, not the manual's revision 2.2.
         projectPath: Optional project directory for read-only BPL pin conflict checks.
     """
+    # Full-evidence output (detail="full") is evaluation-only and not exposed to agents.
     args = _clean(query=query, topK=topK, indexPath=indexPath, device=device, family=family,
                   board=board, hardwareVersion=hardwareVersion, projectPath=projectPath)
     return _to_call_result(await documentation_search_run(args, _tool_context(None)))
 
 
 @mcp.tool(
-    name="flash.program",
+    name="documentation_read",
+    description=(
+        "Read the full text of a chunk returned by documentation_search, using the chunkId shown with an "
+        "excerpt (for example to see a complete table, footnote or register description). "
+        "Preserves stored text and physical PDF page citations; paginate using nextOffset. "
+        "Use the same device/family/indexPath as the search. This does not certify table extraction, "
+        "silicon stepping or answer sufficiency. Reviewed board facts must use documentation_search."
+    ),
+    annotations=_ann("read"),
+)
+async def documentation_read(
+    chunkId: str,
+    offset: int = 0,
+    maxChars: int = 8000,
+    indexPath: str | None = None,
+    device: str | None = None,
+    family: str | None = None,
+) -> CallToolResult:
+    """Read a chunk starting at a character offset; maxChars must be 1..16000."""
+    args = _clean(chunkId=chunkId, offset=offset, maxChars=maxChars,
+                  indexPath=indexPath, device=device, family=family)
+    return _to_call_result(await documentation_read_run(args, _tool_context(None)))
+
+
+@mcp.tool(
+    name="flash_program",
     description=(
         "Program an ELF image via aurixflasher.exe (resolves device id via lsmcdd when available). "
         "If image is omitted, the newest .elf under <workspace>/build is auto-selected."
@@ -390,7 +427,36 @@ async def flash_program(
 
 
 @mcp.tool(
-    name="illd.provision",
+    name="flash_list_devices",
+    description=(
+        "List AURIX kits connected through DAS (AURIXFlasher -detect all): flasher id, chip family, "
+        "board ID, board hardware version (for example 2.0) and serial. Read-only; does not program "
+        "or reset the target. Use it to learn the board hardware revision instead of asking the user."
+    ),
+    annotations=_ann("read"),
+)
+async def flash_list_devices(flasherPath: str | None = None) -> CallToolResult:
+    """List connected AURIX kits and their board hardware versions.
+
+    Args:
+        flasherPath: Optional path to AURIXFlasher.exe; located automatically when omitted.
+    """
+    result = await asyncio.to_thread(detect_connected_devices, flasherPath, use_cache=False)
+    if not result["ok"]:
+        return _to_call_result(ToolResult.text(f'flash_list_devices error: {result["error"]}', is_error=True))
+    devices = result["devices"]
+    lines = [f"{len(devices)} connected device(s)."] + [
+        f'id {d["id"]}: {d["family"]} chip {d["chipId"]} | board {d["board"] or "unknown"} | '
+        f'hardware {d["hardwareVersion"] or "unknown"} | {d["boardHardware"] or "no board info"}'
+        for d in devices
+    ]
+    if not devices:
+        lines.append("No kit detected: check the USB connection, or ask the user for the board hardware version.")
+    return _to_call_result(ToolResult.text("\n".join(lines), structured=result))
+
+
+@mcp.tool(
+    name="illd_provision",
     description=(
         "List or copy iLLD library modules from the GitHub-cloned cache into the project workspace. "
         "Use action='list' to browse the cached iLLD directory structure, "
@@ -424,7 +490,7 @@ async def illd_provision(
 
 
 @mcp.tool(
-    name="project.scan",
+    name="project_scan",
     description=(
         "Recursively scan a project directory and return all source files (.c), assembly files (.S/.s/.src), "
         "include directories (containing .h files), and linker scripts (.ld/.lsl). "

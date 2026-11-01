@@ -1,7 +1,41 @@
-# Reviewed Board Facts
+# Reviewed Board Facts and Board-Manual Text
 
-This small index contains manually reviewed factual summaries, not complete manuals
-or automatically extracted schematic connections. Original PDFs are not distributed.
+This index contains two kinds of board-scoped records:
+
+- **Reviewed facts** (`<board>/chunks.jsonl`, built into `boards.sqlite` here):
+  manually reviewed pin and active-level summaries, checked against the
+  project BPL.
+- **Manual text** (`../board_manual_text/<board>/chunks.jsonl`, built into
+  `../board_manual_text/board-text.sqlite`): extracted prose and table
+  text of a board user's manual, one chunk per physical page, with board and
+  hardware-revision metadata and no `facts`. `documentation_search` returns it
+  when a query names the board (or when the reviewed-fact path has no answer).
+  When the board hardware revision is known (argument, query, project BPL, or
+  the connected kit via `AURIXFlasher -detect all`) and matches the manual, it
+  is `usableForCodeGeneration: true` with
+  `usageRestriction: cite_board_manual_page`: the agent uses it without asking
+  the user and cites document, revision and page in a code comment. With an
+  unknown revision it is `usageRestriction: board_hardware_version_required`
+  and the agent is told to call `flash_list_devices` before asking the user.
+  It is a separate index so that a server still running older code after an
+  update (before the MCP server restarts) cannot read it as reviewed facts.
+
+Schematics, placement drawings and pin-header figures are not indexed: their
+flattened PDF text does not preserve connections. Original PDFs are not distributed.
+
+## TC375 Lite V2 manual text
+
+- Source: AURIX lite Kit V2 Board User's Manual, document revision 2.2,
+  2022-04-14, 27 pages, supplied by the user on 2026-10-29. That copy was
+  re-saved by PDFium (SHA-256
+  `3f2fe35c96ff1f61de939acf85b712ecc7fd83f9ef5ccfe8f9574727e4b6807b`, recorded
+  as `source_sha256`); its cover, revision and page count match the official
+  file below. Citations use the official download URL.
+- Indexed physical pages: 6-15 and 19 (introduction, power, LEDs/buttons,
+  debugging/USB serial, reset, CAN, I2C EEPROM, Ethernet, optional flash/F-RAM,
+  boot/config signals, optional resistors, DAP connector). Pages 16-18
+  (pin-header figures) and 20-26 (schematics, placement) are excluded.
+- Hardware revision metadata: `2` only.
 
 ## TC375 Lite V2
 
@@ -20,7 +54,8 @@ or automatically extracted schematic connections. Original PDFs are not distribu
 
 Table 4's R33 footnote applies to the R32/AN0 potentiometer, not BUTTON1.
 Reset, emergency-stop LED3, miniWiggler LEDs, voltage/current limits and pull-up
-configuration are outside this reviewed subset. Missing hardware revision is not
+configuration are outside this reviewed subset; they are searchable as board
+manual text (usable with a page citation once the revision is known). Missing hardware revision is not
 inferred from a chip model, board selection, BPL filename, or document revision.
 
 ## TC4D7 Lite V2.x
@@ -79,9 +114,10 @@ From the standalone Python server directory, with `src` on `PYTHONPATH`:
 
 ```pwsh
 python -m aurix_mcp_server.documentation_retrieval build src/aurix_mcp_server/data/board_manuals src/aurix_mcp_server/data/board_manuals/boards.sqlite
+python -m aurix_mcp_server.documentation_retrieval build src/aurix_mcp_server/data/board_manual_text src/aurix_mcp_server/data/board_manual_text/board-text.sqlite
 ```
 
-The JSONL records are the source of truth. Sync this directory and the modified
+The JSONL records are the source of truth. Sync this directory, `../board_manual_text` and the modified
 Python modules to the extension's bundled server after rebuilding. Existing chip
 manual indexes are not modified. Runtime queries open the index without downloading
 or extracting a PDF.

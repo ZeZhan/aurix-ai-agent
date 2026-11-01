@@ -17,8 +17,12 @@ are concept mappings and which code comes from official Infineon examples.
   resource-ownership analysis, phase orchestration, user approvals, exception
   decisions (repair / fall back / stop), the evidence ledger, and report generation.
 - **Existing MCP tools** do the real work — do not re-implement them:
-  `examples.*` (find/read examples), `illd.*` (provision/lookup), `ads.*`
-  (scaffold), `build.*` (compile), `flash.*` (program), `aurix_debug_*` (inspect).
+  `examples_*` (find/read examples), `illd_*` (provision/lookup), `ads_*`
+  (scaffold), `build_*` (compile), `flash_*` (program).
+- **AURIX Debug MCP** is optional and separate. For requested runtime validation,
+  read [aurix-debug-workflow](../aurix-debug-workflow/SKILL.md) and discover the
+  actual exposed `debug_*` tools. That skill owns session control, startup
+  parameters and readback; this skill owns the migration assertions and ledger.
 
 ## Principle: behaviour first
 
@@ -41,7 +45,7 @@ it must already exist on disk. (Resumability = re-reading this file + the checkl
    ledger* below) with the request, constraints, and empty `capabilities`/`claims`
    arrays. Every later step appends to this same file.
 2. **Acquire & register the source example.** Read the folder the user placed
-   in the workspace (`project.scan` + `#codebase`). Record source, and its
+   in the workspace (`project_scan` + `#codebase`). Record source, and its
    **license / provenance / permitted use** (see governance below).
 3. **Extract observable behaviour.** Inputs, outputs, timing, data flow, and
    exception/fault behaviour. This is the contract the port must satisfy.
@@ -56,25 +60,33 @@ it must already exist on disk. (Resumability = re-reading this file + the checkl
 8. **User approval of the design.** Stop and present the plan + ownership table;
    proceed only after explicit approval.
 9. **Create a dedicated project folder — never scaffold at the workspace root.**
-   Call `ads.create_project` with `workspace` = a **new subfolder** named
+   Call `ads_create_project` with `workspace` = a **new subfolder** named
    `aurix-port-<task>/` (reuse the ledger `<task>` slug). All generated output
    (`Libraries/iLLD`, `Configurations`, `Lcf`, the Makefile, sources) must land
    **inside that subfolder** — never in the workspace root, and never inside the
    source-vendor sources (their SDK/linker/startup cause link errors). Copy only your
    new AURIX `.c`/`.h` into that subfolder.
 10. **Implement.** Re-implement the behaviour with iLLD, per the concept map;
-    verify every signature/struct/pin against iLLD headers (`examples.*`,
+    verify every signature/struct/pin against iLLD headers (`examples_*`,
     `aurix-illd-lookup`). Reuse official example subsystems (Hard rule 5).
-11. **Static check** → **12. Build** — run `build.run` with `workspace` set to the
+11. **Static check** → **12. Build** — run `build_run` with `workspace` set to the
     `aurix-port-<task>/` folder (first-error-first, max 3 repairs; missing iLLD ⇒
-    `illd.provision`; `-mcpu` error ⇒ re-scaffold).
+    `illd_provision`; `-mcpu` error ⇒ re-scaffold).
 13. **Pre-flash diagnostics.** Run the prerequisite checklist below before asking
     to flash. (Until a `flash.preflight` MCP tool exists, verify verbally and
     report any item you could not confirm.)
-14. **User confirmation to flash**, then **15. Flash** (`flash.program`). If the
+14. **User confirmation to flash**, then **15. Flash** (`flash_program`). If the
     user said *build only* / *do not flash*, stop after build and report the ELF.
-16. **Runtime verification.** Use `aurix_debug_*` for L5. When the user supplies
-    later evidence (L5/L6 results, waveform/timing/bandwidth confirmed), **update
+16. **Runtime verification when requested.** Follow
+    [aurix-debug-workflow](../aurix-debug-workflow/SKILL.md) using AURIX Debug MCP
+    for L5. Reuse a suitable session or prepare an authorized startup; separate
+    programming in step 15 does not skip startup flashing. Omit the removed
+    `flash` input and follow the Debug Skill's preservation and full-erase
+    authorization rules. Tool
+    availability alone does not authorize verification on a build-only or
+    flash-only task. If tools are not obtained, follow the tool discovery
+    rule in the workspace instructions and record the gap without claiming L5.
+    When the user supplies later evidence (L5/L6 results, waveform/timing/bandwidth confirmed), **update
     the ledger** (`verificationReached` + a new claim) **and re-render
     `PORTING_REPORT.md`** so every affected part reflects the new result — including
     `verificationReached`, the Verification section, and any "to verify on HW" items
@@ -155,7 +167,7 @@ produces evidence (capability match, build success, flash success, debugger).
 - **L2** static check pass
 - **L3** build success
 - **L4** flash success
-- **L5** debugger observes expected state (`aurix_debug_*`)
+- **L5** debugger observes the requested assertions (AURIX Debug MCP `debug_*`)
 - **L6** external instrument confirms waveform / bandwidth / timing (user-only)
 
 Report the highest level reached. L4 alone does not mean the demo runs. The report
