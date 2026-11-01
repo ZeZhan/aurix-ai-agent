@@ -61,7 +61,7 @@ class BuildLogTests(unittest.TestCase):
 
 class BuildRunTests(unittest.IsolatedAsyncioTestCase):
     async def run_build(self, stdout: bytes, stderr: bytes, exit_code: int = 0,
-                        timed_out: bool = False, log_failure: bool = False):
+                        timed_out: bool = False, log_failure: bool = False, extra: dict | None = None):
         process = AsyncMock()
         process.returncode = exit_code
         process.stdout = asyncio.StreamReader()
@@ -78,12 +78,16 @@ class BuildRunTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(build_run.asyncio, "create_subprocess_shell", return_value=process):
                 if log_failure:
                     with patch.object(build_run.tempfile, "NamedTemporaryFile", side_effect=OSError("disk full")):
-                        result = await build_run._run({"workspace": workspace}, ToolContext(send_progress=progress))
+                        result = await build_run._run({"workspace": workspace, **(extra or {})}, ToolContext(send_progress=progress))
                 else:
-                    result = await build_run._run({"workspace": workspace}, ToolContext(send_progress=progress))
+                    result = await build_run._run({"workspace": workspace, **(extra or {})}, ToolContext(send_progress=progress))
         for path in result.structured_content["logFiles"].values():
             self.addCleanup(Path(path).unlink, missing_ok=True)
         return result, progress, process
+
+    async def test_short_agent_timeout_is_raised_to_full_build_minimum(self) -> None:
+        result, _, _ = await self.run_build(b"Build complete: build/TC375.elf\n", b"", extra={"timeoutMs": 120000})
+        self.assertEqual(result.structured_content["timeoutMs"], build_run.MIN_BUILD_TIMEOUT_MS)
 
     async def test_success_keeps_warning_and_artifact_summary_with_complete_logs(self) -> None:
         stdout = ("Compiling source.c " + "-Iinclude " * 300 + "\n") * 500

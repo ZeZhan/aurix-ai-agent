@@ -269,6 +269,8 @@ function resolveMcpLaunchSpec(folder: vscode.WorkspaceFolder): {
   if (selectedDevice) {
     baseEnv.AURIX_SELECTED_DEVICE = selectedDevice;
   }
+  // Lets documentation_search read the board hardware revision from the connected kit.
+  baseEnv.AURIX_DEVICE_DETECTION = "1";
   if (extensionInstallPath) {
     const documentationDir = path.join(extensionInstallPath, BUNDLED_DOCUMENTATION_DIR_RELATIVE);
     if (fs.existsSync(documentationDir)) {

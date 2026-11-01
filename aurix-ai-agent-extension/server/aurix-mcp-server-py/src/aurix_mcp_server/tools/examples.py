@@ -1,4 +1,4 @@
-"""MCP tools: examples.search, examples.import, examples.read_source
+"""MCP tools: examples_search, examples_import, examples_read_source
 
 Search, import (download), and read AURIX code examples from the indexed
 catalog. Supports: local filesystem, zip archives (via Python zipfile), and
@@ -131,8 +131,8 @@ def _summarize_text(value: str, max_chars: int) -> str:
 def _build_readiness_note(target: str, regen_msg: Optional[str]) -> str:
     if os.path.isfile(os.path.join(target, "Makefile")):
         detail = f"\n{regen_msg}" if regen_msg else ""
-        return detail + "\nMakefile: present (try build.run; no scaffold needed solely for Makefile creation)."
-    return "\nNo Makefile was generated: call ads.create_project for this device before build.run."
+        return detail + "\nMakefile: present (try build_run; no scaffold needed solely for Makefile creation)."
+    return "\nNo Makefile was generated: call ads_create_project for this device before build_run."
 
 
 def _cpu_main_sort_key(rel_file: str) -> tuple[int, str]:
@@ -647,7 +647,7 @@ def _read_text_from_zip(zip_path: str, internal_path: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# examples.search
+# examples_search
 # ---------------------------------------------------------------------------
 
 async def _search_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
@@ -694,7 +694,7 @@ async def _search_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 
 
 # ---------------------------------------------------------------------------
-# examples.import
+# examples_import
 # ---------------------------------------------------------------------------
 
 async def _run_import_stage(
@@ -714,7 +714,7 @@ async def _run_import_stage(
         send_started = time.monotonic()
         metrics["progressSendCount"] += 1
         try:
-            await ctx.send_progress(f"examples.import: {message}", "stdout")
+            await ctx.send_progress(f"examples_import: {message}", "stdout")
         except Exception:
             pass
         finally:
@@ -808,9 +808,9 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     example_id = args.get("id", "").strip()
     target_dir = args.get("targetDir", "").strip()
     if not example_id:
-        raise ValueError("examples.import requires id")
+        raise ValueError("examples_import requires id")
     if not target_dir:
-        raise ValueError("examples.import requires targetDir")
+        raise ValueError("examples_import requires targetDir")
 
     started_at = time.monotonic()
     timings_ms: dict[str, int] = {}
@@ -852,10 +852,10 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         ) if ok else None
         duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
         text = (
-            f"examples.import succeeded: {len(result['downloaded'])} file(s) downloaded to {target}"
+            f"examples_import succeeded: {len(result['downloaded'])} file(s) downloaded to {target}"
             f"{_build_readiness_note(target, regen_msg)}"
             if ok else
-            f"examples.import failed: {len(result['downloaded'])} downloaded, {len(result['errors'])} error(s).{error_detail}"
+            f"examples_import failed: {len(result['downloaded'])} downloaded, {len(result['errors'])} error(s).{error_detail}"
             f"{'\nHint: This is likely a GitHub API rate limit (60 req/hr unauthenticated). Try again later or download manually from https://github.com/Infineon/AURIX_code_examples.' if not result['downloaded'] else ''}"
         )
         return ToolResult(
@@ -915,10 +915,10 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         ) if ok else None
         duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
         text = (
-            f"examples.import succeeded: {len(downloaded)} file(s) extracted to {target}"
+            f"examples_import succeeded: {len(downloaded)} file(s) extracted to {target}"
             f"{_build_readiness_note(target, regen_msg)}"
             if ok else
-            f"examples.import failed: {len(downloaded)} extracted, {len(errors)} error(s).{error_detail}"
+            f"examples_import failed: {len(downloaded)} extracted, {len(errors)} error(s).{error_detail}"
         )
         return ToolResult(
             content=[TextContent(text=text + timing_note)],
@@ -939,19 +939,19 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     )
     duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
     return ToolResult(
-        content=[TextContent(text=f"examples.import succeeded: {len(result['downloaded'])} file(s) copied to {target}{_build_readiness_note(target, regen_msg)}{timing_note}")],
+        content=[TextContent(text=f"examples_import succeeded: {len(result['downloaded'])} file(s) copied to {target}{_build_readiness_note(target, regen_msg)}{timing_note}")],
         structured_content={"ok": True, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, **result},
     )
 
 
 # ---------------------------------------------------------------------------
-# examples.read_source
+# examples_read_source
 # ---------------------------------------------------------------------------
 
 async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     example_id = (args.get("id") or "").strip()
     if not example_id:
-        raise ValueError("examples.read_source requires id")
+        raise ValueError("examples_read_source requires id")
 
     index_path_arg = args.get("indexPath")
     _, data = _load_examples_index(index_path_arg)

@@ -1,9 +1,9 @@
-"""MCP tool: ads.create_project
+"""MCP tool: ads_create_project
 
 Creates a device project template from the local ADS installation.
 Extracts iLLD libraries, configuration files, linker scripts, and source stubs.
 
-Also exports `regenerate_makefile_for_workspace()` used by examples.import.
+Also exports `regenerate_makefile_for_workspace()` used by examples_import.
 
 Mirrors src/tools.adsCreateProject.ts.
 """
@@ -648,7 +648,7 @@ def generate_makefile(cache_path: str, info: DeviceInfo, studio_dir: str, device
     ]
 
     # Define flags
-    define_flags = ["-DCOMPILER_GNU", "-D__HIGHTEC__"]
+    define_flags = ["-DCOMPILER_GNU"]
     if cfg["deviceDefine"]:
         define_flags.append(f"-D{cfg['deviceDefine']}")
     if cfg["pinPackageDefine"]:
@@ -656,6 +656,10 @@ def generate_makefile(cache_path: str, info: DeviceInfo, studio_dir: str, device
 
     all_includes = sorted(set([".", *include_paths, *extra_includes]))
     include_flags = [f"-I{p}" for p in all_includes]
+    cpu_note = (
+        "# tricore-gcc has no tc37xx derivative; TC37x shares the TC1.6.2P core of tc38xx.\n"
+        if info.illd_dir == "TC37A" else ""
+    )
 
     extra_srcs_block = ""
     if extra_srcs:
@@ -697,7 +701,7 @@ TARGET    = {device}
 BUILD_DIR = build
 
 # ── CPU & Defines ──
-CPU = -mcpu={info.mcpu}
+{cpu_note}CPU = -mcpu={info.mcpu}
 DEFINES = {' '.join(define_flags)}
 
 # ── Include paths ──
@@ -708,7 +712,7 @@ INCLUDES = \\
 LDSCRIPT = {find_linker_script(cache_path)}
 
 # ── Compiler flags (match ADS: -std=c99, -fstrict-volatile-bitfields for HW regs) ──
-CFLAGS  = $(CPU) -std=c99 -O0 -g3 -Wall -ffunction-sections -fdata-sections -fno-common -fstrict-volatile-bitfields
+CFLAGS  = $(CPU) -std=c99 -Og -g -Wall -ffunction-sections -fdata-sections -fno-common -fstrict-volatile-bitfields
 CFLAGS += $(DEFINES) $(INCLUDES)
 
 ASFLAGS = $(CPU) -x assembler-with-cpp $(DEFINES) $(INCLUDES)
@@ -737,35 +741,43 @@ C_OBJS   = $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SRCS))
 ASM_OBJS = $(patsubst %.S,$(BUILD_DIR)/%.o,$(patsubst %.s,$(BUILD_DIR)/%.o,$(ASM_SRCS)))
 OBJS     = $(C_OBJS) $(ASM_OBJS)
 DEPS     = $(C_OBJS:.o=.d)
+# Output directories are created once (order-only prerequisite), not by a mkdir per object.
+OBJ_DIRS = $(patsubst %/,%,$(sort $(dir $(OBJS))))
+# Library/configuration objects only; build_run reuses them across projects (build_cache.py).
+LIB_OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(CFG_SRCS) $(LIB_SRCS))
 
 # ── Rules ──
-.PHONY: all clean
+.PHONY: all clean illd-objs
 
 all: $(BUILD_DIR)/$(TARGET).elf $(BUILD_DIR)/$(TARGET).hex
 \t@echo "Build complete: $(BUILD_DIR)/$(TARGET).elf"
 \t@$(SIZE) $(BUILD_DIR)/$(TARGET).elf
 
+illd-objs: $(LIB_OBJS)
+
+$(OBJ_DIRS):
+\t@mkdir -p $@
+
+$(OBJS): | $(OBJ_DIRS)
+
 $(BUILD_DIR)/$(TARGET).elf: $(OBJS)
 \t@echo "Linking: $@"
-\t@mkdir -p $(dir $@)
 \t$(LD) $(LDFLAGS) $^ -o $@
 
 $(BUILD_DIR)/$(TARGET).hex: $(BUILD_DIR)/$(TARGET).elf
 \t$(OBJCOPY) -O ihex $< $@
 
+# $(info) prints without starting a shell; process start-up dominates build time on Windows.
 $(BUILD_DIR)/%.o: %.c
-\t@echo "Compiling: $<"
-\t@mkdir -p $(dir $@)
+\t$(info Compiling: $<)
 \t$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.S
-\t@echo "Assembling: $<"
-\t@mkdir -p $(dir $@)
+\t$(info Assembling: $<)
 \t$(AS) $(ASFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.s
-\t@echo "Assembling: $<"
-\t@mkdir -p $(dir $@)
+\t$(info Assembling: $<)
 \t$(AS) $(ASFLAGS) -c $< -o $@
 
 clean:
@@ -942,7 +954,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     workspace = (args.get("workspace") or "").strip() or None
 
     if not device:
-        raise ValueError("ads.create_project requires device")
+        raise ValueError("ads_create_project requires device")
 
     upper_device = normalize_device(device)
     info = DEVICE_MAP.get(upper_device)
@@ -956,14 +968,14 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     try:
         board = selected_board(args.get("board"), workspace, device)
         if device.upper().startswith("KIT_") and board and normalize_board(device) != board:
-            return ToolResult.text("ads.create_project failed: device and board specify different boards", is_error=True)
+            return ToolResult.text("ads_create_project failed: device and board specify different boards", is_error=True)
         requested_device = re.search(r"TC(?:\d{3}|4[A-Z]\d)", device.upper())
         board_device = re.search(r"TC(?:\d{3}|4[A-Z]\d)", board or "")
         if board_device and requested_device and board_device[0] != requested_device[0]:
-            return ToolResult.text("ads.create_project failed: board and device refer to different devices", is_error=True)
+            return ToolResult.text("ads_create_project failed: board and device refer to different devices", is_error=True)
         studio_dir = resolve_studio_dir(workspace)
     except ValueError as error:
-        return ToolResult.text(f"ads.create_project failed: {error}", is_error=True)
+        return ToolResult.text(f"ads_create_project failed: {error}", is_error=True)
     except FileNotFoundError as e:
         return ToolResult(
             content=[TextContent(text=f"Cannot resolve ADS installation: {e}")],
@@ -1007,7 +1019,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             board_pins = resolve_board_pins(None, board, studio_dir)
             board_pins["deployment"] = "not_copied"
         lines = [
-            f"ads.create_project succeeded for {upper_device}:",
+            f"ads_create_project succeeded for {upper_device}:",
             f"  {'Deployed to' if deployed_to else 'Cache path'}: {target_path}",
             f"  iLLD directory: {info.illd_dir}",
             f"  {format_illd_version(illd_version)}",
@@ -1018,7 +1030,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             *[f"  {d}" for d in deploy_details],
         ]
         if deployed_to:
-            lines.append("  Makefile is ready — call build.run next.")
+            lines.append("  Makefile is ready — call build_run next.")
 
         return ToolResult(
             content=[TextContent(text="\n".join(lines))],
@@ -1036,7 +1048,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         )
     except Exception as e:
         return ToolResult(
-            content=[TextContent(text=f"ads.create_project failed: {e}")],
+            content=[TextContent(text=f"ads_create_project failed: {e}")],
             is_error=True,
         )
 
@@ -1047,10 +1059,10 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 
 def regenerate_makefile_for_workspace(workspace_dir: str) -> Optional[str]:
     """Regenerate the Makefile in-place for a workspace that already has
-    Libraries + Configurations deployed. Called by examples.import after
+    Libraries + Configurations deployed. Called by examples_import after
     importing files that add source directories.
 
-    Returns None if the workspace is not a valid ads.create_project workspace,
+    Returns None if the workspace is not a valid ads_create_project workspace,
     or a status string on success.
     """
     ifx_cfg_path = os.path.join(workspace_dir, "Configurations", "Ifx_Cfg.h")

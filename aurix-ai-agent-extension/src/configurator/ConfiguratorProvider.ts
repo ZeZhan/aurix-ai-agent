@@ -582,39 +582,39 @@ export class ConfiguratorProvider implements vscode.WebviewViewProvider {
         <div class="server-badge">Registered server: aurix-mcp-server</div>
         <div class="tools-grid">
           <div class="tool-item">
-            <span class="tool-name">ads.create_project</span>
+            <span class="tool-name">ads_create_project</span>
             <span class="tool-desc">Create project skeleton (iLLD + Makefile + linker)</span>
           </div>
           <div class="tool-item">
-            <span class="tool-name">build.run</span>
+            <span class="tool-name">build_run</span>
             <span class="tool-desc">Build project (auto-PATHs toolchain)</span>
           </div>
           <div class="tool-item">
-            <span class="tool-name">flash.program</span>
+            <span class="tool-name">flash_program</span>
             <span class="tool-desc">Flash .elf/.hex to target board</span>
           </div>
           <div class="tool-item">
-            <span class="tool-name">examples.search</span>
+            <span class="tool-name">examples_search</span>
             <span class="tool-desc">Search official iLLD examples</span>
           </div>
           <div class="tool-item">
-            <span class="tool-name">examples.read_source</span>
+            <span class="tool-name">examples_read_source</span>
             <span class="tool-desc">Read example source files</span>
           </div>
           <div class="tool-item">
-            <span class="tool-name">examples.import</span>
+            <span class="tool-name">examples_import</span>
             <span class="tool-desc">Import example into workspace</span>
           </div>
           <div class="tool-item">
-            <span class="tool-name">documentation.search</span>
+            <span class="tool-name">documentation_search</span>
             <span class="tool-desc">Search bundled TC2xx/TC3xx/TC4Dx documentation</span>
           </div>
           <div class="tool-item">
-            <span class="tool-name">illd.provision</span>
+            <span class="tool-name">illd_provision</span>
             <span class="tool-desc">Install/refresh iLLD libraries</span>
           </div>
           <div class="tool-item">
-            <span class="tool-name">project.scan</span>
+            <span class="tool-name">project_scan</span>
             <span class="tool-desc">Inspect workspace structure</span>
           </div>
         </div>

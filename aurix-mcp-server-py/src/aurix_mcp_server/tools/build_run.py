@@ -1,4 +1,4 @@
-"""MCP tool: build.run
+"""MCP tool: build_run
 
 Run a project build command inside a workspace, auto-prepending the AURIX
 toolchain (make + tricore-gcc) to PATH. Mirrors src/tools.buildRun.ts.
@@ -16,11 +16,13 @@ import time
 from collections import deque
 from typing import Any, Optional
 
+from .. import build_cache
 from ..context import context_get, load_workspace_context
 from ..tooldef import TextContent, ToolContext, ToolResult
 from ..utils import ensure_directory
 
 DEFAULT_BUILD_TIMEOUT_MS = 10 * 60 * 1000
+MIN_BUILD_TIMEOUT_MS = 5 * 60 * 1000
 DEFAULT_BUILD_COMMAND = "make --output-sync -j20 all"
 
 TAIL_LINES = 120
@@ -228,7 +230,7 @@ def _build_path_env(
 
 async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
     if not isinstance(args, dict):
-        raise ValueError("build.run requires an object argument")
+        raise ValueError("build_run requires an object argument")
 
     workspace_arg = args.get("workspace")
     context = load_workspace_context(workspace_arg)
@@ -247,13 +249,31 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
 
     timeout_ms_arg = args.get("timeoutMs")
     if isinstance(timeout_ms_arg, (int, float)) and timeout_ms_arg == timeout_ms_arg:  # not NaN
-        timeout_ms = max(1000, int(timeout_ms_arg))
+        # A killed full iLLD build is restarted from scratch, so short agent-chosen limits only waste time.
+        timeout_ms = max(MIN_BUILD_TIMEOUT_MS, int(timeout_ms_arg))
     else:
         timeout_ms = DEFAULT_BUILD_TIMEOUT_MS
 
     path_additions = args.get("pathAdditions")
     env, effective_path_additions = _build_path_env(path_additions, workspace_root)
     shell = args.get("shell") if isinstance(args.get("shell"), bool) else True
+
+    build_cache_report: Optional[dict[str, Any]] = None
+    if command == DEFAULT_BUILD_COMMAND:
+        try:
+            task = asyncio.ensure_future(asyncio.to_thread(build_cache.prepare, cwd, env, timeout_ms / 1000))
+            while not (await asyncio.wait({task}, timeout=15))[0]:
+                try:
+                    await ctx.send_progress(
+                        "Compiling the shared iLLD build cache (once per toolchain and settings)...\n",
+                        "stdout",  # type: ignore[arg-type]
+                    )
+                except Exception:
+                    pass
+            build_cache_report = task.result()
+        except Exception as error:
+            # The cache is an optimisation; any problem falls back to the normal full build.
+            build_cache_report = {"status": "failed", "reason": str(error)}
 
     started_at = time.monotonic()
     timed_out = False
@@ -344,11 +364,18 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
                      or stdout_log.line_count > tail_count or stderr_log.line_count > tail_count)
 
     headline = (
-        f"build.run succeeded (exitCode={exit_code}, durationMs={duration_ms})"
+        f"build_run succeeded (exitCode={exit_code}, durationMs={duration_ms})"
         if ok else
-        f"build.run failed (exitCode={exit_code}, timedOut={str(timed_out).lower()}, durationMs={duration_ms})"
+        f"build_run failed (exitCode={exit_code}, timedOut={str(timed_out).lower()}, durationMs={duration_ms})"
     )
     sections = [headline]
+    if build_cache_report and build_cache_report.get("status") in {"hit", "created"}:
+        sections.append(
+            f'iLLD build cache {build_cache_report["status"]}: reused {build_cache_report["seededObjects"]} '
+            f'precompiled library objects ({build_cache_report["durationMs"]} ms).'
+        )
+    elif build_cache_report and build_cache_report.get("status") in {"failed", "dependency-mismatch"}:
+        sections.append(f'iLLD build cache not used ({build_cache_report.get("reason")}); built normally.')
     if ok:
         sections.append(stdout)
     else:
@@ -392,6 +419,7 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             "logFileErrors": log_file_errors,
             "stdout": stdout,
             "stderr": stderr,
+            "buildCache": build_cache_report,
         },
     )
 

@@ -1,4 +1,4 @@
-"""MCP tool: project.scan
+"""MCP tool: project_scan
 
 Recursively scans a project directory and returns a structured inventory:
 source files (.c), assembly (.S/.s/.src), include directories (containing .h),
@@ -226,9 +226,9 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             for pin in result["boardPins"]["pins"]:
                 lines.append(f"  {pin['pin']}: {', '.join(pin['aliases'])}")
         lines.append(
-            "Makefile: present (try build.run; no scaffold needed solely for Makefile creation)"
+            "Makefile: present (try build_run; no scaffold needed solely for Makefile creation)"
             if result["hasMakefile"] else
-            "Makefile: missing (run ads.create_project to generate it)"
+            "Makefile: missing (run ads_create_project to generate it)"
         )
         if result["excludedDirs"]:
             lines.append(f"Excluded: {', '.join(result['excludedDirs'])}")
@@ -244,7 +244,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 
         return ToolResult.text("\n".join(lines), structured={"scan": result})
     except Exception as error:  # noqa: BLE001
-        return ToolResult.text(f"project.scan failed: {safe_error_message(error)}", is_error=True)
+        return ToolResult.text(f"project_scan failed: {safe_error_message(error)}", is_error=True)
 
 
 

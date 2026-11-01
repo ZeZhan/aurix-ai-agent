@@ -239,7 +239,7 @@ class DocumentationSearchTests(unittest.IsolatedAsyncioTestCase):
         ) as search:
             result = await _run({"query": "TC375 GPIO output LED", "indexPath": index.name}, None)
         self.assertFalse(result.is_error, result.content[0].text)
-        search.assert_called_once_with(Path(index.name).resolve(), "TC375 GPIO output LED", limit=3)
+        search.assert_called_once_with(Path(index.name).resolve(), "TC375 GPIO output LED", limit=3, follow_up=True)
 
     async def test_project_bpl_and_reviewed_facts_agree(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -368,7 +368,7 @@ class DocumentationSearchTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.is_error)
         self.assertEqual(result.structured_content["family"], "tc2xx")
-        search.assert_called_once_with(tc2_index.resolve(), "TC275 standby RAM", limit=3)
+        search.assert_called_once_with(tc2_index.resolve(), "TC275 standby RAM", limit=3, follow_up=True)
 
     async def test_multiple_generations_are_an_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
@@ -437,14 +437,25 @@ class DocumentationSearchTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertFalse(result.is_error)
-        search.assert_called_once_with(Path(index.name).resolve(), "port output", limit=MAX_TOP_K)
+        search.assert_called_once_with(Path(index.name).resolve(), "port output", limit=MAX_TOP_K, follow_up=True)
         self.assertEqual(result.structured_content["resultCount"], 1)
         self.assertFalse(result.structured_content["abstained"])
         self.assertEqual(
             result.structured_content["results"][0]["citation"]["pdf_pages"],
             [42],
         )
-        self.assertIn("physical PDF page(s) 42", result.content[0].text)
+        self.assertIn("p.42", result.content[0].text)
+        self.assertNotIn("excerpt", result.structured_content["results"][0]["citation"])
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as index, patch(
+            "aurix_mcp_server.tools.documentation_search.search_results",
+            return_value=[search_result],
+        ):
+            full = await _run(
+                {"query": "port output", "indexPath": index.name, "detail": "full"},
+                None,  # type: ignore[arg-type]
+            )
+        self.assertIn("physical PDF page(s) 42", full.content[0].text)
 
     async def test_no_results_returns_abstention(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".sqlite") as index, patch(

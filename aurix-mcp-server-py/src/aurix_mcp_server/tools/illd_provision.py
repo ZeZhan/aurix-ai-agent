@@ -1,4 +1,4 @@
-"""MCP tool: illd.provision
+"""MCP tool: illd_provision
 
 List or copy iLLD library modules from the GitHub-cloned cache into the
 project workspace. Mirrors src/tools.illdProvision.ts.
@@ -29,20 +29,20 @@ MAX_TREE_DEPTH = 6
 
 def _parse_input(args: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(args, dict):
-        raise ValueError("illd.provision requires an object argument")
+        raise ValueError("illd_provision requires an object argument")
     action = args.get("action")
     if action not in ("list", "copy"):
-        raise ValueError('illd.provision requires action: "list" or "copy"')
+        raise ValueError('illd_provision requires action: "list" or "copy"')
     device = args.get("device")
     if not isinstance(device, str) or not device.strip():
-        raise ValueError("illd.provision requires device")
+        raise ValueError("illd_provision requires device")
     if action == "copy":
         sources = args.get("sources")
         if not isinstance(sources, list) or len(sources) == 0:
-            raise ValueError("illd.provision copy requires non-empty sources array")
+            raise ValueError("illd_provision copy requires non-empty sources array")
         destination = args.get("destination")
         if not isinstance(destination, str) or not destination.strip():
-            raise ValueError("illd.provision copy requires destination")
+            raise ValueError("illd_provision copy requires destination")
     return args
 
 
@@ -180,7 +180,7 @@ async def _handle_list(args: dict[str, Any]) -> ToolResult:
     if not cache_root:
         return ToolResult.text(
             f"No cached iLLD found for family {family}x. "
-            f"Clone the iLLD repo to {ILLD_CACHE_DIR} or use ads.create_project to provision iLLD.",
+            f"Clone the iLLD repo to {ILLD_CACHE_DIR} or use ads_create_project to provision iLLD.",
             is_error=True,
         )
 
@@ -240,7 +240,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             return await _handle_list(args)
         return await _handle_copy(args)
     except Exception as error:  # noqa: BLE001
-        return ToolResult.text(f"illd.provision error: {safe_error_message(error)}", is_error=True)
+        return ToolResult.text(f"illd_provision error: {safe_error_message(error)}", is_error=True)
 
 
 
