@@ -85,3 +85,17 @@ def format_illd_version(result: dict[str, Any]) -> str:
     if result.get("reason") == "scan_limit":
         return "iLLD version: unknown (scan limit reached; increase maxFiles)"
     return "iLLD version: unknown (no consistent, readable version declaration)"
+
+def quick_illd_version(project_path: str) -> Optional[dict[str, Any]]:
+    """Version declared by the project's iLLD at its usual locations; None when the project has no iLLD."""
+    root = Path(project_path)
+    libraries = root / "Libraries"
+    if not (libraries / "iLLD").is_dir():
+        return None
+    headers = [path for path in (libraries / "iLLD").glob(f"*/*/{VERSION_HEADER}") if path.is_file()]
+    if (libraries / VERSION_HEADER).is_file():
+        headers.append(libraries / VERSION_HEADER)
+    if not headers:
+        # Unusual layout: fall back to the full search.
+        return detect_illd_version(project_path)
+    return detect_illd_version(project_path, [header.relative_to(root).as_posix() for header in headers])

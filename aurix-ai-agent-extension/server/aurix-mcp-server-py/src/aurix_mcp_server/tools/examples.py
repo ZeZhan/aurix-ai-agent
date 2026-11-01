@@ -25,6 +25,7 @@ from urllib.error import HTTPError, URLError
 import httpx
 
 from .ads_create_project import regenerate_makefile_for_workspace
+from ..illd_version import format_illd_version, quick_illd_version
 from ..tooldef import TextContent, ToolContext, ToolResult
 from ..utils import safe_error_message
 
@@ -133,6 +134,16 @@ def _build_readiness_note(target: str, regen_msg: Optional[str]) -> str:
         detail = f"\n{regen_msg}" if regen_msg else ""
         return detail + "\nMakefile: present (try build_run; no scaffold needed solely for Makefile creation)."
     return "\nNo Makefile was generated: call ads_create_project for this device before build_run."
+
+
+def _illd_note(target: str, files: list[str], example_id: str) -> tuple[str, Optional[dict[str, Any]]]:
+    """Which iLLD the project now uses and where it came from."""
+    version = quick_illd_version(target)
+    if version is None:
+        return "\niLLD: none in the project yet (ads_create_project deploys the selected IDE's iLLD).", None
+    bundled = any(re.search(r"(?:^|[\\/])Libraries[\\/]iLLD[\\/]", str(path)) for path in files)
+    origin = f"bundled with example {example_id}" if bundled else "already in the project (the example ships no iLLD)"
+    return f"\n{format_illd_version(version)}; source: {origin}.", version
 
 
 def _cpu_main_sort_key(rel_file: str) -> tuple[int, str]:
@@ -914,16 +925,17 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             "makefile", asyncio.to_thread(regenerate_makefile_for_workspace, target), _ctx, timings_ms, stage_diagnostics,
         ) if ok else None
         duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
+        illd_text, illd_version = _illd_note(target, downloaded, example["id"]) if ok else ("", None)
         text = (
             f"examples_import succeeded: {len(downloaded)} file(s) extracted to {target}"
-            f"{_build_readiness_note(target, regen_msg)}"
+            f"{_build_readiness_note(target, regen_msg)}{illd_text}"
             if ok else
             f"examples_import failed: {len(downloaded)} extracted, {len(errors)} error(s).{error_detail}"
         )
         return ToolResult(
             content=[TextContent(text=text + timing_note)],
             is_error=not ok,
-            structured_content={"ok": ok, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, "downloaded": downloaded, "skipped": skipped_files, "errors": errors},
+            structured_content={"ok": ok, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "illdVersion": illd_version, "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, "downloaded": downloaded, "skipped": skipped_files, "errors": errors},
         )
 
     # Local filesystem
@@ -938,9 +950,10 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         "makefile", asyncio.to_thread(regenerate_makefile_for_workspace, target), _ctx, timings_ms, stage_diagnostics,
     )
     duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
+    illd_text, illd_version = _illd_note(target, result.get("downloaded", []), example["id"])
     return ToolResult(
-        content=[TextContent(text=f"examples_import succeeded: {len(result['downloaded'])} file(s) copied to {target}{_build_readiness_note(target, regen_msg)}{timing_note}")],
-        structured_content={"ok": True, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, **result},
+        content=[TextContent(text=f"examples_import succeeded: {len(result['downloaded'])} file(s) copied to {target}{_build_readiness_note(target, regen_msg)}{illd_text}{timing_note}")],
+        structured_content={"ok": True, "exampleId": example["id"], "sourceRoot": source_root, "targetDir": target, "hasMakefile": os.path.isfile(os.path.join(target, "Makefile")), "illdVersion": illd_version, "durationMs": duration_ms, "timingsMs": timings_ms, "diagnostics": diagnostics, **result},
     )
 
 

@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 from .. import build_cache
 from ..context import context_get, load_workspace_context
+from ..illd_version import format_illd_version, quick_illd_version
 from ..tooldef import TextContent, ToolContext, ToolResult
 from ..utils import ensure_directory
 
@@ -369,6 +370,12 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         f"build_run failed (exitCode={exit_code}, timedOut={str(timed_out).lower()}, durationMs={duration_ms})"
     )
     sections = [headline]
+    try:
+        illd_version = quick_illd_version(cwd)
+    except OSError:
+        illd_version = None
+    if illd_version is not None:
+        sections.append(format_illd_version(illd_version))
     if build_cache_report and build_cache_report.get("status") in {"hit", "created"}:
         sections.append(
             f'iLLD build cache {build_cache_report["status"]}: reused {build_cache_report["seededObjects"]} '
@@ -420,6 +427,7 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
             "stdout": stdout,
             "stderr": stderr,
             "buildCache": build_cache_report,
+            "illdVersion": illd_version,
         },
     )
 

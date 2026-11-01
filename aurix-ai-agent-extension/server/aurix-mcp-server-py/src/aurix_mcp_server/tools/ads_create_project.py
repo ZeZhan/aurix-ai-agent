@@ -799,6 +799,22 @@ clean:
 # Main: create project in cache
 # ---------------------------------------------------------------------------
 
+def _illd_source(pi: "InitializerPaths", studio_dir: str) -> dict[str, Any]:
+    zip_path = os.path.abspath(pi.illd_zip)
+    return {"zip": zip_path, "size": os.path.getsize(zip_path), "ide": os.path.abspath(studio_dir)}
+
+
+def _same_illd_source(cached: Any, current: dict[str, Any]) -> bool:
+    return (isinstance(cached, dict) and cached.get("size") == current["size"]
+            and os.path.normcase(str(cached.get("zip"))) == os.path.normcase(current["zip"]))
+
+
+def describe_illd_source(source: Optional[dict[str, Any]]) -> str:
+    if not source:
+        return "unknown (template created before sources were recorded)"
+    return f'{os.path.basename(source["zip"])} from {source["ide"]}'
+
+
 def create_project_in_cache(device: str, studio_dir: str) -> dict[str, Any]:
     upper_device = normalize_device(device)
     info = DEVICE_MAP.get(upper_device)
@@ -809,28 +825,48 @@ def create_project_in_cache(device: str, studio_dir: str) -> dict[str, Any]:
     cache_path = os.path.join(DEVICE_PROJECTS_CACHE, info.illd_dir)
     marker_file = os.path.join(cache_path, ".device_project_ready")
     details: list[str] = []
+    try:
+        pi: Optional[InitializerPaths] = find_project_initializer(studio_dir, info)
+        initializer_error: Optional[Exception] = None
+    except FileNotFoundError as error:
+        pi, initializer_error = None, error
+    source = _illd_source(pi, studio_dir) if pi else None
 
-    # Check cache
+    # Check cache: the template is only reused when it was built from the iLLD the selected IDE provides.
     if os.path.isfile(marker_file):
-        cached_version = None
+        marker: dict[str, Any] = {}
         try:
-            marker = json.loads(open(marker_file, "r").read())
-            cached_version = marker.get("templateVersion")
+            with open(marker_file, "r", encoding="utf-8") as fh:
+                marker = json.load(fh)
         except Exception:
             pass
-        if cached_version == TEMPLATE_VERSION:
+        cached_version = marker.get("templateVersion")
+        cached_source = marker.get("illdSource")
+        if cached_version == TEMPLATE_VERSION and source and _same_illd_source(cached_source, source):
             details.append(f"Using cached project template at {cache_path} (v{TEMPLATE_VERSION})")
-            return {"cachePath": cache_path, "info": info, "details": details}
-        details.append(
-            f"Cache at {cache_path} is stale (have={cached_version or 'unknown'}, need={TEMPLATE_VERSION}); regenerating."
-        )
+            return {"cachePath": cache_path, "info": info, "details": details, "illdSource": cached_source}
+        if cached_version == TEMPLATE_VERSION and source is None:
+            details.append(
+                f"The selected IDE has no iLLD for {info.illd_dir} ({initializer_error}); "
+                f"using the cached template built from {describe_illd_source(cached_source)}."
+            )
+            return {"cachePath": cache_path, "info": info, "details": details, "illdSource": cached_source}
+        if cached_version != TEMPLATE_VERSION:
+            details.append(
+                f"Cache at {cache_path} is stale (have={cached_version or 'unknown'}, need={TEMPLATE_VERSION}); regenerating."
+            )
+        else:
+            details.append(
+                f"Cached template was built from {describe_illd_source(cached_source)}; the selected IDE "
+                f"provides {describe_illd_source(source)}; regenerating."
+            )
+    if pi is None:
+        raise initializer_error  # type: ignore[misc]
 
     # Clean and create
     if os.path.exists(cache_path):
         shutil.rmtree(cache_path, ignore_errors=True)
     os.makedirs(cache_path, exist_ok=True)
-
-    pi = find_project_initializer(studio_dir, info)
 
     # 1. Extract iLLD zip
     details.append(f"Extracting iLLD from {os.path.basename(pi.illd_zip)}...")
@@ -939,10 +975,11 @@ def create_project_in_cache(device: str, studio_dir: str) -> dict[str, Any]:
             "illdDir": info.illd_dir,
             "family": info.family,
             "cores": info.cores,
+            "illdSource": source,
             "createdAt": __import__("datetime").datetime.now().isoformat(),
         }, fh)
 
-    return {"cachePath": cache_path, "info": info, "details": details}
+    return {"cachePath": cache_path, "info": info, "details": details, "illdSource": source}
 
 
 # ---------------------------------------------------------------------------
@@ -990,9 +1027,12 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 
         deployed_to: Optional[str] = None
         deploy_details: list[str] = []
+        illd_source_text = describe_illd_source(result.get("illdSource"))
 
         if workspace:
             deployed_to = os.path.abspath(workspace)
+            if os.path.isdir(os.path.join(deployed_to, "Libraries", "iLLD")):
+                illd_source_text = "existing project Libraries/ (kept; not replaced by the IDE's iLLD)"
             os.makedirs(deployed_to, exist_ok=True)
             deploy_details.extend(deploy_template_dependencies(cache_path, deployed_to))
 
@@ -1023,6 +1063,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             f"  {'Deployed to' if deployed_to else 'Cache path'}: {target_path}",
             f"  iLLD directory: {info.illd_dir}",
             f"  {format_illd_version(illd_version)}",
+            f"  iLLD source: {illd_source_text}",
             f"  {format_board_pins(board_pins)}",
             f"  Family: {info.family}",
             f"  Cores: {info.cores}",
@@ -1041,6 +1082,7 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
                 "cachePath": cache_path,
                 "illdDir": info.illd_dir,
                 "illdVersion": illd_version,
+                "illdSource": illd_source_text,
                 "boardPins": board_pins,
                 "family": info.family,
                 "cores": info.cores,
