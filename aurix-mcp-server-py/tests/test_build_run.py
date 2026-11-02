@@ -72,9 +72,11 @@ class BuildRunTests(unittest.IsolatedAsyncioTestCase):
         process.stderr.feed_eof()
         process.wait = AsyncMock(side_effect=[asyncio.TimeoutError(), None] if timed_out else [None])
         process.kill = unittest.mock.Mock()
+        process.pid = 4242
         progress = AsyncMock()
         with tempfile.TemporaryDirectory() as workspace:
             with patch.object(build_run, "_build_path_env", return_value=({}, [])), \
+                    patch.object(build_run, "kill_process_tree") as kill_tree, \
                     patch.object(build_run.asyncio, "create_subprocess_shell", return_value=process):
                 if log_failure:
                     with patch.object(build_run.tempfile, "NamedTemporaryFile", side_effect=OSError("disk full")):
@@ -83,6 +85,7 @@ class BuildRunTests(unittest.IsolatedAsyncioTestCase):
                     result = await build_run._run({"workspace": workspace, **(extra or {})}, ToolContext(send_progress=progress))
         for path in result.structured_content["logFiles"].values():
             self.addCleanup(Path(path).unlink, missing_ok=True)
+        process.kill_tree = kill_tree
         return result, progress, process
 
     async def test_short_agent_timeout_is_raised_to_full_build_minimum(self) -> None:
@@ -126,6 +129,8 @@ class BuildRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.is_error)
         self.assertTrue(result.structured_content["timedOut"])
         self.assertIn("still compiling", result.content[0].text)
+        # Killing only the shell would leave make and the compilers running on Windows.
+        process.kill_tree.assert_called_once_with(4242)
         process.kill.assert_called_once()
 
     async def test_log_storage_failure_does_not_change_build_result(self) -> None:
@@ -134,6 +139,102 @@ class BuildRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.structured_content["logFiles"], {})
         self.assertEqual(set(result.structured_content["logFileErrors"]), {"stdout", "stderr"})
         self.assertIn("disk full", result.content[0].text)
+
+
+class BuildRunCancellationTests(unittest.IsolatedAsyncioTestCase):
+    """A silent make must keep the client's request alive; a cancelled request must stop the build."""
+
+    def silent_process(self, finish: asyncio.Event) -> unittest.mock.Mock:
+        process = unittest.mock.Mock()
+        process.pid = 4242
+        process.returncode = None
+        process.stdout = asyncio.StreamReader()
+        process.stderr = asyncio.StreamReader()
+
+        async def wait():
+            await finish.wait()
+            process.returncode = 0
+            for stream in (process.stdout, process.stderr):
+                if not stream.at_eof():
+                    stream.feed_eof()
+            return 0
+
+        process.wait = wait
+        return process
+
+    def start(self, process, progress, workspace: str, **patches) -> asyncio.Task:
+        stack = [
+            patch.object(build_run, "_build_path_env", return_value=({}, [])),
+            patch.object(build_run.asyncio, "create_subprocess_shell", AsyncMock(return_value=process)),
+            *(patch.object(build_run, name, value) for name, value in patches.items()),
+        ]
+        for patcher in stack:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return asyncio.ensure_future(build_run._run({"workspace": workspace}, ToolContext(send_progress=progress)))
+
+    async def test_silent_make_sends_heartbeats_that_are_not_build_output(self) -> None:
+        finish = asyncio.Event()
+        process = self.silent_process(finish)
+        progress = AsyncMock()
+        with tempfile.TemporaryDirectory() as workspace:
+            task = self.start(process, progress, workspace, HEARTBEAT_SECONDS=0.05)
+            for _ in range(200):
+                if any("still running" in call.args[0] for call in progress.await_args_list):
+                    break
+                await asyncio.sleep(0.01)
+            process.stdout.feed_data(b"Build complete: build/TC4D7.elf\n")
+            finish.set()
+            result = await task
+        self.assertFalse(result.is_error, result.content[0].text)
+        heartbeats = [call.args[0] for call in progress.await_args_list if "still running" in call.args[0]]
+        self.assertTrue(heartbeats)
+        self.assertNotIn("still running", Path(result.structured_content["logFiles"]["stdout"]).read_text())
+        self.assertNotIn("still running", result.structured_content["stdout"])
+        for path in result.structured_content["logFiles"].values():
+            Path(path).unlink(missing_ok=True)
+
+    async def test_cancelled_request_stops_the_whole_build(self) -> None:
+        finish = asyncio.Event()
+        process = self.silent_process(finish)
+        kill_tree = unittest.mock.Mock()
+        with tempfile.TemporaryDirectory() as workspace:
+            task = self.start(process, AsyncMock(), workspace, kill_process_tree=kill_tree)
+            for _ in range(200):
+                if build_run.asyncio.create_subprocess_shell.await_count:
+                    break
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        # Left running, make would compete with the retried build_run for the same objects.
+        kill_tree.assert_called_once_with(4242)
+        process.kill.assert_called_once()
+
+    async def test_cancelled_request_stops_a_cache_build(self) -> None:
+        import threading
+
+        started = threading.Event()
+        stopped = threading.Event()
+
+        def prepare(cwd, env, timeout_s, cancel):
+            started.set()
+            if cancel.wait(timeout=10):
+                stopped.set()
+            return {"status": "failed", "reason": "cache build cancelled"}
+
+        finish = asyncio.Event()
+        process = self.silent_process(finish)
+        with tempfile.TemporaryDirectory() as workspace, \
+                patch.object(build_run.build_cache, "prepare", side_effect=prepare):
+            task = self.start(process, AsyncMock(), workspace)
+            await asyncio.to_thread(started.wait, 5)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertTrue(await asyncio.to_thread(stopped.wait, 5))
+        build_run.asyncio.create_subprocess_shell.assert_not_awaited()
 
 
 if __name__ == "__main__":

@@ -18,8 +18,9 @@ description: Migrate or port AURIX TriCore code between devices or families (e.g
    and exact API signatures (see skill `aurix-illd-lookup`). Cross-family moves
    (TC4x↔TC3x↔TC2x) can rename entire modules and change function signatures.
 3. **Resolve pins.** Use `documentation_search` for target-board schematics or
-   connectivity, then confirm the software symbol in the target iLLD PinMap
-   headers. Never assume pins are the same across devices or boards.
+   connectivity, then confirm the software symbol in the target project's iLLD
+   pin map for its package (see skill `aurix-illd-lookup`). Never assume pins
+   are the same across devices or boards.
 4. **Global replace.** `grep_search` the workspace for every source-family
    API and fix **all files in one pass** (Cpu0–CpuN, all app files). Do not
    fix one file at a time.

@@ -35,8 +35,19 @@ observations and resolve any existing session before programming.
    Use `documentation_read` for truncated chunks. The board hardware revision
    is detected from the connected kit (shown in the result, or call
    `flash_list_devices`); ask the user only if no matching kit is connected.
-   Use examples and iLLD headers for implementation patterns and exact APIs (see
-   skill `aurix-illd-lookup`), not as substitutes for device documentation.
+   TC4x kits need no revision: their board documentation applies to all.
+   Use examples and iLLD headers for implementation patterns and exact APIs,
+   not as substitutes for device documentation. Route each fact to its source:
+   - **iLLD in the project's `Libraries/`** (skill `aurix-illd-lookup`):
+     function signatures, config struct fields and defaults, enums, pin-map
+     symbols, register/bitfield names. Glob the header by name, then search
+     inside it; never search the whole `Libraries/` tree.
+   - **Board documentation / BPL / board example `pin.h`**: which pin a board
+     signal uses and its active level; then take the symbol from the pin map
+     of the project's package.
+   - **`documentation_search`**: clock/timing/electrical limits, register
+     behaviour, errata. Numbers in iLLD comments are not specifications.
+
    Cap follow-up research at 2–3 additional rounds; use
    `examples_read_source` only for the most relevant hit. For
    each subsystem, **classify** the best-matching example as *full-reuse*,
@@ -102,7 +113,8 @@ loop on searches, delegate discovery to subagents, or bypass the interface.
 
 For factual questions (e.g. *max TOM frequency?*), call
 `documentation_search` with the explicit device and answer from its cited
-evidence. State any claim the evidence does not support. Use
-`examples_*` or iLLD headers only to supplement API details. Do
+evidence. State any claim the evidence does not support. iLLD headers can
+answer symbol-level facts (register/bitfield names, base addresses, instance
+counts) and supplement API details, but not limits, timing or errata. Do
 **not** scaffold a project. If the request implies behaviour on hardware, treat
 it as a code task.

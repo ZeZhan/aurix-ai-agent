@@ -1076,6 +1076,7 @@ def search_results(
     *,
     board: str | None = None,
     hardware_version: str | None = None,
+    any_hardware_version: bool = False,
     veto_unknown_anchors: bool = True,
     follow_up: bool = False,
 ) -> list[dict[str, object]]:
@@ -1093,6 +1094,8 @@ def search_results(
                 "(SELECT chunk_id FROM board_chunks)"
             )
             requested_version = hardware_version.strip().lower().removeprefix("v") if hardware_version else None
+            if any_hardware_version:
+                requested_version = None
             for row in connection.execute("SELECT * FROM board_chunks WHERE board = ?", (board,)):
                 metadata = json.loads(row["metadata"])
                 if requested_version and not any(
@@ -1127,7 +1130,9 @@ def search_results(
             metadata = metadata_by_chunk.get(result["chunk_id"])
             if metadata:
                 result["facts"] = metadata.get("facts", [])
-                result["applicability"] = "matched" if hardware_version else "hardware_version_required"
+                result["applicability"] = (
+                    "matched" if hardware_version or any_hardware_version else "hardware_version_required"
+                )
                 result["citation"].update({key: value for key, value in metadata.items() if key != "facts"})
         if follow_up and rows:
             results.extend(_follow_up_results(

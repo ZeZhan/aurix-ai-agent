@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .board_pins import BOARD_ALIASES, normalize_board, resolve_board_pins, selected_board
-from .connected_devices import detected_hardware_version
+from .connected_devices import TC4X_REVISION_NOTE, detected_hardware_version
 from .documentation_retrieval import board_signal_facts, hardware_version_matches, search_results
 
 
@@ -51,6 +51,15 @@ def _board_in_text(text: str) -> str | None:
     if len(boards) > 1:
         raise ValueError("Board documentation query refers to multiple boards")
     return next(iter(boards), None)
+
+
+def revision_independent(board: str | None) -> bool:
+    """TC4x kits: board documentation applies to every kit revision.
+
+    Their DAS board ID does not identify the revision (a TC4D7 lite Kit V2.1 reports V1.0), so neither
+    a detected nor a requested revision may exclude the board documentation.
+    """
+    return bool(board) and "TC4" in board.upper()
 
 
 def _hardware_version(value: str | None) -> str | None:
@@ -147,6 +156,10 @@ def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, An
         board = board or pins.get("board")
         if board and chips and chips != set(re.findall(r"TC(?:\d{3}|4[A-Z]\d)", board)):
             raise ValueError("Project BPL board and requested device do not match")
+    any_revision = revision_independent(board)
+    if any_revision:
+        hardware_version = None
+    elif pins is not None:
         declared_version = pins.get("hardwareVersion")
         if declared_version and hardware_version and not (
             hardware_version_matches(hardware_version, declared_version)
@@ -155,7 +168,7 @@ def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, An
             pins = {**pins, "status": "conflict", "reason": "BPL and requested hardware revisions differ"}
         elif declared_version and (not hardware_version or hardware_version.endswith(".x")):
             hardware_version = _hardware_version(declared_version)
-    detected = None if hardware_version else detected_hardware_version(board)
+    detected = None if hardware_version or any_revision else detected_hardware_version(board)
     if detected:
         hardware_version = _hardware_version(detected["hardwareVersion"])
     payload = {
@@ -163,6 +176,8 @@ def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, An
         "supportedFields": ["pin", "active_level"], "results": [],
         "requiresConfirmation": False,
     }
+    if any_revision:
+        payload["hardwareVersionNote"] = TC4X_REVISION_NOTE
     if detected:
         payload["hardwareVersionDetected"] = detected
     if pins is not None:
@@ -183,6 +198,7 @@ def board_evidence(args: dict[str, Any], query: str, top_k: int) -> dict[str, An
     # Manual-text chunks share the board scope; the reviewed-fact path keeps only fact chunks.
     results = search_results(
         database, signal_query, limit=max(top_k * 3, 10), board=board, hardware_version=hardware_version,
+        any_hardware_version=any_revision,
     ) if signal_query else []
     results = [
         result for result in results if result["citation"].get("board") == board and result.get("facts")
@@ -252,12 +268,14 @@ def board_manual_text(
     database = Path(args["indexPath"]).expanduser().resolve() if args.get("indexPath") else BOARD_TEXT_INDEX
     if not database.is_file():
         return []
+    any_revision = revision_independent(board)
     results = search_results(
-        database, query, limit=top_k, board=board, hardware_version=hardware_version, veto_unknown_anchors=False,
+        database, query, limit=top_k, board=board, hardware_version=hardware_version,
+        any_hardware_version=any_revision, veto_unknown_anchors=False,
     )
     text = [result for result in results if result["citation"].get("board") == board and not result.get("facts")]
     # Results are already filtered to the requested revision; a wildcard revision is not a known one.
-    known = bool(hardware_version) and not hardware_version.lower().endswith(".x")
+    known = any_revision or (bool(hardware_version) and not hardware_version.lower().endswith(".x"))
     for result in text:
         result["applicability"] = "board_manual_text" if known else "hardware_version_required"
         result["usableForCodeGeneration"] = known

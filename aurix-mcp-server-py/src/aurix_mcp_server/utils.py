@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+import signal
+import subprocess
 
 MAX_CAPTURE_BYTES = 64 * 1024
 
@@ -38,6 +40,33 @@ def to_hex(buffer: bytes) -> str:
 
 def safe_error_message(error: BaseException) -> str:
     return str(error)
+
+
+def new_process_group_kwargs() -> dict:
+    """Subprocess options that let kill_process_tree stop a shell together with its children."""
+    if os.name == "nt":
+        return {}
+    return {"start_new_session": True}
+
+
+def kill_process_tree(pid: int) -> None:
+    """Stop a process and everything it started.
+
+    Killing only a ``shell=True`` process leaves make and the compilers running on Windows,
+    where they keep writing files and compete with the next build.
+    """
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(int(pid))], capture_output=True, timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        else:
+            # Started with start_new_session, so the process group id is the pid; never resolve the
+            # group with getpgid, which could name the server's own group.
+            os.killpg(int(pid), signal.SIGKILL)
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+        pass
 
 
 class LimitedBuffer:

@@ -12,6 +12,7 @@ import glob
 import os
 import re
 import tempfile
+import threading
 import time
 from collections import deque
 from typing import Any, Optional
@@ -20,11 +21,13 @@ from .. import build_cache
 from ..context import context_get, load_workspace_context
 from ..illd_version import format_illd_version, quick_illd_version
 from ..tooldef import TextContent, ToolContext, ToolResult
-from ..utils import ensure_directory
+from ..utils import ensure_directory, kill_process_tree, new_process_group_kwargs
 
 DEFAULT_BUILD_TIMEOUT_MS = 10 * 60 * 1000
 MIN_BUILD_TIMEOUT_MS = 5 * 60 * 1000
 DEFAULT_BUILD_COMMAND = "make --output-sync -j20 all"
+# Well below the client's 180 s limit without progress (Copilot calls MCP tools with resetTimeoutOnProgress).
+HEARTBEAT_SECONDS = 15
 
 TAIL_LINES = 120
 MAX_ERROR_LINES = 200
@@ -261,9 +264,14 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
 
     build_cache_report: Optional[dict[str, Any]] = None
     if command == DEFAULT_BUILD_COMMAND:
+        cancel_cache = threading.Event()
         try:
-            task = asyncio.ensure_future(asyncio.to_thread(build_cache.prepare, cwd, env, timeout_ms / 1000))
-            while not (await asyncio.wait({task}, timeout=15))[0]:
+            task = asyncio.ensure_future(
+                asyncio.to_thread(build_cache.prepare, cwd, env, timeout_ms / 1000, cancel_cache)
+            )
+            # Retrieve a late exception if this call is cancelled before the thread finishes.
+            task.add_done_callback(lambda done: done.cancelled() or done.exception())
+            while not (await asyncio.wait({task}, timeout=HEARTBEAT_SECONDS))[0]:
                 try:
                     await ctx.send_progress(
                         "Compiling the shared iLLD build cache (once per toolchain and settings)...\n",
@@ -272,11 +280,16 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
                 except Exception:
                     pass
             build_cache_report = task.result()
+        except asyncio.CancelledError:
+            # The thread stops its make (and releases the entry lock) within about a second.
+            cancel_cache.set()
+            raise
         except Exception as error:
             # The cache is an optimisation; any problem falls back to the normal full build.
             build_cache_report = {"status": "failed", "reason": str(error)}
 
     started_at = time.monotonic()
+    last_progress = started_at
     timed_out = False
 
     stdout_log = BuildLog()
@@ -289,10 +302,12 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         command, cwd=cwd, env=env,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        **new_process_group_kwargs(),
     )
 
     async def pump(stream: asyncio.StreamReader, log: BuildLog,
                    kind: str) -> None:
+        nonlocal last_progress
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         full_log = None
         try:
@@ -315,6 +330,7 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
                         log_file_errors[kind] = str(error)
                 text = decoder.decode(chunk)
                 log.feed(text)
+                last_progress = time.monotonic()
                 try:
                     await ctx.send_progress(text, kind)  # type: ignore[arg-type]
                 except Exception:
@@ -326,28 +342,65 @@ async def _run(args: dict[str, Any], ctx: ToolContext) -> ToolResult:
                 except OSError as error:
                     log_file_errors[kind] = str(error)
 
+    async def heartbeat() -> None:
+        # The client cancels a request after 180 s without progress, and make --output-sync prints a
+        # file only once it is compiled, so a slow compile or link can be silent for longer than that.
+        nonlocal last_progress
+        while True:
+            await asyncio.sleep(HEARTBEAT_SECONDS)
+            now = time.monotonic()
+            if now - last_progress < HEARTBEAT_SECONDS:
+                continue
+            last_progress = now
+            try:
+                await ctx.send_progress(
+                    f"build_run: make still running ({int(now - started_at)} s elapsed)...\n",
+                    "stdout",  # type: ignore[arg-type]
+                )
+            except Exception:
+                pass
+
     pumps = asyncio.gather(
         pump(proc.stdout, stdout_log, "stdout"),  # type: ignore[arg-type]
         pump(proc.stderr, stderr_log, "stderr"),  # type: ignore[arg-type]
     )
+    heartbeat_task = asyncio.ensure_future(heartbeat())
 
     exit_code: Optional[int]
     try:
-        await asyncio.wait_for(proc.wait(), timeout=timeout_ms / 1000)
-        exit_code = proc.returncode
-    except asyncio.TimeoutError:
-        timed_out = True
         try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        await proc.wait()
-        exit_code = proc.returncode
+            await asyncio.wait_for(proc.wait(), timeout=timeout_ms / 1000)
+            exit_code = proc.returncode
+        except asyncio.TimeoutError:
+            timed_out = True
+            # The shell's children (make, gcc) would otherwise keep running after the timeout.
+            await asyncio.to_thread(kill_process_tree, proc.pid)
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            await proc.wait()
+            exit_code = proc.returncode
 
-    try:
-        await pumps
-    except Exception:
-        pass
+        try:
+            await pumps
+        except Exception:
+            pass
+    except BaseException:
+        # Usually the client cancelling the request (its timeout, or the user stopping the agent).
+        # A build left running would compete with the retried build_run for the same files, so the
+        # whole process tree is stopped synchronously here, where awaiting is no longer possible.
+        if proc.returncode is None:
+            kill_process_tree(proc.pid)
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        pumps.cancel()
+        pumps.add_done_callback(lambda done: done.cancelled() or done.exception())
+        raise
+    finally:
+        heartbeat_task.cancel()
 
     duration_ms = int((time.monotonic() - started_at) * 1000)
     stdout_log.close()

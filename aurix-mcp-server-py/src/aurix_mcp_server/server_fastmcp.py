@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from typing import Any, Literal, Optional
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -328,7 +329,8 @@ async def examples_search(
         "Long questions are automatically re-searched per clause with keyword follow-up queries (marked "
         "follow-up); uncoveredTerms lists question identifiers absent from all returned text. "
         "Specify device/family when the query does not identify the target. "
-        "For reviewed board LED/button pins and polarity, provide board and hardwareVersion. "
+        "For reviewed board LED/button pins and polarity, provide board and hardwareVersion "
+        "(not needed for TC4x kits, whose board documentation applies to every revision). "
         "Optional projectPath checks these facts against the project's BPL; unresolved scope or conflicts must not be used to generate code."
     ),
     annotations=_ann("read"),
@@ -431,7 +433,8 @@ async def flash_program(
     description=(
         "List AURIX kits connected through DAS (AURIXFlasher -detect all): flasher id, chip family, "
         "board ID, board hardware version (for example 2.0) and serial. Read-only; does not program "
-        "or reset the target. Use it to learn the board hardware revision instead of asking the user."
+        "or reset the target. Use it to learn the board hardware revision instead of asking the user. "
+        "TC4x kits do not report their revision; their board documentation applies to every revision."
     ),
     annotations=_ann("read"),
 )
@@ -445,9 +448,16 @@ async def flash_list_devices(flasherPath: str | None = None) -> CallToolResult:
     if not result["ok"]:
         return _to_call_result(ToolResult.text(f'flash_list_devices error: {result["error"]}', is_error=True))
     devices = result["devices"]
+
+    def hardware(device: dict) -> str:
+        if device.get("hardwareVersionNote"):
+            # The reported "V1.0" is not the kit revision; showing it would invite a wrong conclusion.
+            board_id = re.sub(r"\s+V\d+(?:\.\d+)*", "", device["boardHardware"] or "")
+            return f'hardware revision {device["hardwareVersionNote"]} | {board_id or "no board info"}'
+        return f'hardware {device["hardwareVersion"] or "unknown"} | {device["boardHardware"] or "no board info"}'
+
     lines = [f"{len(devices)} connected device(s)."] + [
-        f'id {d["id"]}: {d["family"]} chip {d["chipId"]} | board {d["board"] or "unknown"} | '
-        f'hardware {d["hardwareVersion"] or "unknown"} | {d["boardHardware"] or "no board info"}'
+        f'id {d["id"]}: {d["family"]} chip {d["chipId"]} | board {d["board"] or "unknown"} | {hardware(d)}'
         for d in devices
     ]
     if not devices:

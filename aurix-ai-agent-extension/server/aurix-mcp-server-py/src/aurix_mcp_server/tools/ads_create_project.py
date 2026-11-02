@@ -28,7 +28,7 @@ from ..tooldef import TextContent, ToolContext, ToolResult
 # ---------------------------------------------------------------------------
 # Template version — bump when Makefile/iLLD scan rules change
 # ---------------------------------------------------------------------------
-TEMPLATE_VERSION = "2026-05-07-v6-pinmap-generic-fix"
+TEMPLATE_VERSION = "2026-11-01-v7-freemarker-in-acs-templates"
 
 # ---------------------------------------------------------------------------
 # Device metadata
@@ -389,6 +389,13 @@ def process_ejs_template(content: str) -> str:
     result = re.sub(r'<%=\s*[^%]*%>', '', result)
     # Remove any remaining EJS tags: <% ... %>
     result = re.sub(r'<%[^%]*%>', '', result)
+    # Some ACS templates (e.g. TC4DA Ifx_Cfg.h.template) also use FreeMarker blocks such as
+    # <#if PPU> ... </#if>; their feature flags are false for a SimpleMain project.
+    prev = None
+    while prev != result:
+        prev = result
+        result = re.sub(r'[ \t]*<#if\s[^>]*>(?:(?!<#if\s)[\s\S])*?</#if>[ \t]*\r?\n?', '', result)
+    result = re.sub(r'[ \t]*</?#[^>]*>[ \t]*\r?\n?', '', result)
     # Clean up excessive blank lines (more than 2 consecutive)
     result = re.sub(r'\n{3,}', '\n\n', result)
     return result
@@ -495,6 +502,39 @@ def find_gcc_cross_compile_prefix(studio_dir: str) -> str:
         if dirs:
             return os.path.join(comp_dir, dirs[0], "bin", "tricore-elf-").replace("\\", "/")
     return ""
+
+
+def _referenced_pin_packages(libraries_dir: str) -> set[str]:
+    """Pin package suffixes the iLLD pin-map headers actually test (``defined(IFX_PIN_PACKAGE_X)``)."""
+    packages: set[str] = set()
+    for directory, subdirs, names in os.walk(libraries_dir):
+        subdirs[:] = [name for name in subdirs if name not in ILLD_EXCLUDE_DIRS]
+        if os.path.basename(directory) != "_PinMap":
+            continue
+        for name in names:
+            if name.endswith(".h"):
+                try:
+                    with open(os.path.join(directory, name), "r", encoding="utf-8", errors="replace") as fh:
+                        packages.update(re.findall(r"defined\s*\(\s*IFX_PIN_PACKAGE_(\w+)\s*\)", fh.read()))
+                except OSError:
+                    continue
+    return packages
+
+
+def resolve_pin_package_alias(libraries_dir: str, suffix: str) -> Optional[str]:
+    """The iLLD's name for the package configured in Ifx_Cfg.h, when the two disagree.
+
+    ACS 1.0.24's TC4D7 template defines IFX_PIN_PACKAGE_LFBGA292_COM while its iLLD 2.7.0 tests
+    IFX_PIN_PACKAGE_BGA292_COM; without the iLLD name Ifx_PinMap.h silently falls back to the
+    TC4D9 package (BGA436_COM) and no pin-map source matches.
+    """
+    if not suffix:
+        return None
+    referenced = _referenced_pin_packages(libraries_dir)
+    if not referenced or suffix in referenced:
+        return None
+    matches = [name for name in referenced if suffix.endswith(name) or name.endswith(suffix)]
+    return matches[0] if len(matches) == 1 else None
 
 
 def scan_c_sources(directory: str, root_dir: str, pin_package_suffix: str) -> list[str]:
@@ -612,6 +652,13 @@ def generate_makefile(cache_path: str, info: DeviceInfo, studio_dir: str, device
         return details
 
     cfg = parse_ifx_cfg_defines(ifx_cfg_path)
+    package_alias = resolve_pin_package_alias(os.path.join(cache_path, "Libraries"), cfg["pinPackageSuffix"])
+    if package_alias:
+        details.append(
+            f"Ifx_Cfg.h selects IFX_PIN_PACKAGE_{cfg['pinPackageSuffix']}, but this iLLD's pin maps use "
+            f"IFX_PIN_PACKAGE_{package_alias}; defining both."
+        )
+        cfg["pinPackageSuffix"] = package_alias
     gcc_prefix = find_gcc_cross_compile_prefix(studio_dir)
 
     # Scan library sources
@@ -653,6 +700,8 @@ def generate_makefile(cache_path: str, info: DeviceInfo, studio_dir: str, device
         define_flags.append(f"-D{cfg['deviceDefine']}")
     if cfg["pinPackageDefine"]:
         define_flags.append(f"-D{cfg['pinPackageDefine']}")
+    if package_alias:
+        define_flags.append(f"-DIFX_PIN_PACKAGE_{package_alias}")
 
     all_includes = sorted(set([".", *include_paths, *extra_includes]))
     include_flags = [f"-I{p}" for p in all_includes]

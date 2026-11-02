@@ -103,7 +103,6 @@ class DocumentationSearchTests(unittest.IsolatedAsyncioTestCase):
             for arguments in (
                 {"query": "TC375 LED1"},
                 {"query": "LED1", "board": "KIT_A2G_TC375_ARD_SB", "hardwareVersion": "V2"},
-                {"query": "LED1", "board": "KIT_A3G_TC4D7_LITE", "hardwareVersion": "V1"},
                 {"query": "TC375 Lite V1 LED1"},
                 {"query": "TC375 Lite V2.2 LED1"},
                 {"query": "TC375 Lite V2 LED3"},
@@ -138,21 +137,22 @@ class DocumentationSearchTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(facts[signal]["citation"]["document_version"], "002-41555 Rev. *A")
                     self.assertTrue(facts[signal]["usableForCodeGeneration"])
 
-    async def test_tc4d7_bpl_series_accepts_matching_specific_revision(self) -> None:
+    async def test_tc4d7_bpl_check_ignores_the_requested_revision(self) -> None:
+        # TC4x board documentation applies to every kit revision; the BPL pin check still applies.
         with tempfile.TemporaryDirectory() as temp_dir:
             bpl = Path(temp_dir) / "board_pin_label.bpl"
             bpl.write_text("// KIT_A3G_TC4D7_LITE V2.x\nF5, P3.9/LED1\n", encoding="utf-8")
-            original = bpl.read_bytes()
-            for version in (None, "V2.0", "V2.1"):
-                result = await _run({"query": "LED1", "projectPath": temp_dir, "hardwareVersion": version}, None)
-                self.assertFalse(result.is_error, result.content[0].text)
-                item = result.structured_content["results"][0]
-                self.assertEqual(item["bplCheck"], "matched")
-                self.assertTrue(item["usableForCodeGeneration"])
-            conflict = await _run({"query": "LED1", "projectPath": temp_dir, "hardwareVersion": "V3.0"}, None)
-            self.assertTrue(conflict.structured_content["abstained"])
-            self.assertEqual(conflict.structured_content["reason"], "project_bpl_conflict")
-            self.assertEqual(bpl.read_bytes(), original)
+            for version in (None, "V1.0", "V2.0", "V2.1", "V3.0"):
+                with self.subTest(version=version):
+                    result = await _run({"query": "LED1", "projectPath": temp_dir, "hardwareVersion": version}, None)
+                    self.assertFalse(result.is_error, result.content[0].text)
+                    item = result.structured_content["results"][0]
+                    self.assertEqual(item["bplCheck"], "matched")
+                    self.assertTrue(item["usableForCodeGeneration"])
+            bpl.write_text("// KIT_A3G_TC4D7_LITE V2.x\nF5, P3.8/LED1\n", encoding="utf-8")
+            conflict = await _run({"query": "LED1", "projectPath": temp_dir}, None)
+            self.assertEqual(conflict.structured_content["results"][0]["applicability"], "pin_conflict")
+            self.assertFalse(conflict.structured_content["results"][0]["usableForCodeGeneration"])
 
     async def test_tc397_tft_uses_actual_led_designators_and_pins(self) -> None:
         for query in ("TC397 5V TFT V2.0 LEDs", "KIT_A2G_TC397_5V_TFT V2.0 \u706f"):
