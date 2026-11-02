@@ -17,13 +17,16 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
 
+from .utils import kill_process_tree, new_process_group_kwargs
+
 CACHE_FORMAT = "1"
 CACHE_ROOT = Path.home() / ".aurix-agent" / "build_cache"
-MAX_ENTRIES = 4
+MAX_ENTRIES = 8
 CACHE_TARGET = "illd-objs"
 ENVIRONMENT_VARIABLE = "AURIX_BUILD_CACHE"
 CACHED_TREES = ("Libraries", "Configurations")
@@ -34,6 +37,10 @@ COMPLETE_MARKER = ".complete"
 LAST_USED_MARKER = ".last_used"
 DEPENDENCY_MANIFEST = "external-dependencies.json"
 STALE_SECONDS = 24 * 3600
+# The cache build is the same work as a full project build; stopping it early only means the
+# project then compiles everything again, so it is not cut short at build_run's default timeout.
+MIN_CACHE_BUILD_SECONDS = 30 * 60
+CANCEL_POLL_SECONDS = 1.0
 
 
 def enabled() -> bool:
@@ -49,8 +56,10 @@ def _makefile_settings(makefile: str) -> Optional[str]:
     lines = _logical_lines(makefile)
     if not any(line.startswith(f"{CACHE_TARGET}:") for line in lines):
         return None
-    # Application sources do not affect library objects; keep them out of the key.
-    kept = [line for line in lines if not re.match(r"\s*(?:USER_SRCS|EXTRA_SRCS)\s*[:+]?=", line)]
+    # Application sources do not affect library objects. The compiler path is covered, case-insensitively,
+    # by _compiler_identity: "c:/Infineon/..." from a workspace setting and "C:/Infineon/..." from
+    # discovery name the same compiler and must not split the cache.
+    kept = [line for line in lines if not re.match(r"\s*(?:USER_SRCS|EXTRA_SRCS|CROSS_COMPILE)\s*[:+]?=", line)]
     return "\n".join(kept)
 
 
@@ -117,10 +126,16 @@ def fingerprint(project: str | os.PathLike[str]) -> Optional[str]:
     return digest.hexdigest()[:32]
 
 
-def _copy_inputs(project: Path, destination: Path) -> None:
+def _cancelled(cancel: Optional[threading.Event]) -> None:
+    if cancel is not None and cancel.is_set():
+        raise RuntimeError("cache build cancelled")
+
+
+def _copy_inputs(project: Path, destination: Path, cancel: Optional[threading.Event] = None) -> None:
     shutil.copy2(project / "Makefile", destination / "Makefile")
     files = _walk(project)
     for relative in _tree_files(files) + _outside_headers(files):
+        _cancelled(cancel)
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(project / relative, target)
@@ -191,7 +206,37 @@ def _acquire(key: str) -> bool:
     return False
 
 
-def _build_entry(project: Path, key: str, env: dict[str, str], timeout_s: float) -> tuple[Optional[Path], str]:
+def _run_make(
+    source: Path, env: dict[str, str], timeout_s: float, cancel: Optional[threading.Event] = None,
+) -> tuple[int, bytes]:
+    """Compile the library objects; on timeout or cancellation stop make together with its compilers."""
+    process = subprocess.Popen(
+        f"make --output-sync -j20 {CACHE_TARGET}", cwd=source, env=env, shell=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **new_process_group_kwargs(),
+    )
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            # Short waits so a cancelled build_run stops this build within about a second.
+            wait = max(0.01, min(CANCEL_POLL_SECONDS, deadline - time.monotonic()))
+            output, _ = process.communicate(timeout=wait)
+            return process.returncode, output or b""
+        except subprocess.TimeoutExpired:
+            if cancel is not None and cancel.is_set():
+                reason = "cache build cancelled"
+            elif time.monotonic() >= deadline:
+                reason = f"cache build timed out after {int(timeout_s)} s"
+            else:
+                continue
+        kill_process_tree(process.pid)
+        process.kill()
+        process.communicate()
+        raise RuntimeError(f"{reason}; build processes were stopped")
+
+
+def _build_entry(
+    project: Path, key: str, env: dict[str, str], timeout_s: float, cancel: Optional[threading.Event] = None,
+) -> tuple[Optional[Path], str]:
     """Compile the library objects in their final cache directory, so debug paths stay valid."""
     CACHE_ROOT.mkdir(parents=True, exist_ok=True)
     if not _acquire(key):
@@ -203,15 +248,12 @@ def _build_entry(project: Path, key: str, env: dict[str, str], timeout_s: float)
         shutil.rmtree(entry, ignore_errors=True)
         source = entry / "src"
         source.mkdir(parents=True)
-        _copy_inputs(project, source)
-        completed = subprocess.run(
-            f"make --output-sync -j20 {CACHE_TARGET}", cwd=source, env=env, shell=True,
-            capture_output=True, timeout=timeout_s,
-        )
-        if completed.returncode != 0:
+        _copy_inputs(project, source, cancel)
+        returncode, output = _run_make(source, env, max(timeout_s, MIN_CACHE_BUILD_SECONDS), cancel)
+        if returncode != 0:
             log = CACHE_ROOT / f"{key}.failed.log"
-            log.write_bytes(completed.stdout + b"\n" + completed.stderr)
-            raise RuntimeError(f"cache build failed (exit {completed.returncode}); see {log}")
+            log.write_bytes(output)
+            raise RuntimeError(f"cache build failed (exit {returncode}); see {log}")
         (entry / DEPENDENCY_MANIFEST).write_text(
             json.dumps(_external_dependencies(source), indent=1), encoding="utf-8",
         )
@@ -254,8 +296,14 @@ def _dependency_mismatch(entry: Path, project: Path) -> Optional[str]:
     return None
 
 
-def prepare(project: str | os.PathLike[str], env: dict[str, str], timeout_s: float) -> dict[str, Any]:
-    """Seed an empty build directory from the cache, creating the entry when missing."""
+def prepare(
+    project: str | os.PathLike[str], env: dict[str, str], timeout_s: float,
+    cancel: Optional[threading.Event] = None,
+) -> dict[str, Any]:
+    """Seed an empty build directory from the cache, creating the entry when missing.
+
+    Setting ``cancel`` stops an entry that is being created (no entry is left behind).
+    """
     root = Path(project)
     started = time.monotonic()
     report: dict[str, Any] = {"status": "skipped"}
@@ -274,7 +322,7 @@ def prepare(project: str | os.PathLike[str], env: dict[str, str], timeout_s: flo
     if (entry / COMPLETE_MARKER).is_file():
         report["status"] = "hit"
     else:
-        built, error = _build_entry(root, key, env, timeout_s)
+        built, error = _build_entry(root, key, env, timeout_s, cancel)
         if built is None:
             report.update(status="failed", reason=error)
             report["durationMs"] = int((time.monotonic() - started) * 1000)

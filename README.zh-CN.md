@@ -30,6 +30,50 @@
 
 ## 演示画廊
 
+### Demo 1 —— 从空文件夹开始的按键与 LED（TC375 lite Kit）
+按下 BUTTON1 切换 LED1（带软件消抖），LED2 由 STM 定时器中断驱动，以 1 Hz 闪烁。agent 从已连接的板卡识别硬件版本，所有引脚和有效电平都取自板卡手册并在代码中注明页码，一次完成构建和烧录，全程没有向用户提问。
+
+| | 任务 | 模型 | 时长 | 链接 |
+|---|---|---|---|---|
+| [<img src="https://img.youtube.com/vi/d2pNy5nRjvw/hqdefault.jpg" width="320"/>](https://youtu.be/d2pNy5nRjvw) | 按键切换 LED（带消抖）+ STM 中断心跳灯，引脚引用板卡手册，构建并烧录 | GPT-6 Luna (medium) · 约 2.8 AI credits | ~6 min | [▶ 观看](https://youtu.be/d2pNy5nRjvw) |
+
+<details>
+<summary>Prompt</summary>
+
+```text
+On the TC375 lite Kit (KIT_A2G_TC375_LITE), create a small button/LED application from this empty workspace:
+
+1. LED1 is off after reset. Each press of the on-board user button BUTTON1 toggles LED1 (press once: on, press again: off), exactly one toggle per press, with software debounce of about 20 ms.
+2. LED2 blinks as a heartbeat: 500 ms on, 500 ms off, driven by an STM timer interrupt (not a busy-wait loop).
+3. Take the LED and button pins and their active levels from the board documentation, and cite the document and page number in a code comment for each pin.
+4. Build and flash the firmware to the connected board.
+
+Finally, report: which files you created or changed, the source (document and page, or official example) for every pin and active level, and the build and flash results.
+```
+
+</details>
+
+### Demo 2 —— 从空文件夹开始的 UART 控制台（TC4D7 lite Kit）
+通过板载 USB 口实现的串口控制台：复位时打印芯片型号和 iLLD 版本，每秒输出一行状态，支持 `led on`、`led off`、`status` 命令。agent 以官方 UART shell 示例为基础，LED 和按键引脚取自板卡指南（注明页码），一次完成构建和烧录。
+
+| | 任务 | 模型 | 时长 | 链接 |
+|---|---|---|---|---|
+| [<img src="https://img.youtube.com/vi/h3ZbVIxtaIM/hqdefault.jpg" width="320"/>](https://youtu.be/h3ZbVIxtaIM) | USB 串口控制台：周期状态输出、消抖按键计数、LED 命令，报告引脚来源，构建并烧录 | GPT-6 Luna (medium) · 约 6.3 AI credits | ~10 min | [▶ 观看](https://youtu.be/h3ZbVIxtaIM) |
+
+<details>
+<summary>Prompt</summary>
+
+```text
+On the TC4D7 lite Kit (KIT_A3G_TC4D7_LITE), create a UART console from this empty workspace:
+
+1. USB virtual COM port, 115200 baud. On reset, print the device name and iLLD version.
+2. Every second, print uptime, LED1 state and the debounced BUTTON1 press count.
+3. Commands: "led on" / "led off" switch LED1, "status" prints the status line, anything else replies "unknown command".
+4. Build and flash, then report the changed files, the source of each pin, and the build and flash results.
+```
+
+</details>
+
 ### Pose Game —— 摄像头 → 以太网 → TC375 → SPI TFT
 AI 生成的姿态检测运行在 PC 摄像头上，经以太网串流到驱动 SPI TFT 触摸屏的
 TC375，实现实时显示与一个小游戏 —— 全部由 AI agent 编写。
@@ -37,13 +81,6 @@ TC375，实现实时显示与一个小游戏 —— 全部由 AI agent 编写。
 | | Prompt | 时长 | 链接 |
 |---|---|---|---|
 | [<img src="https://img.youtube.com/vi/MV0CGIHywlQ/hqdefault.jpg" width="320"/>](https://youtube.com/shorts/MV0CGIHywlQ) | *""* | ~60 s | [▶ 观看](https://youtube.com/shorts/MV0CGIHywlQ) |
-
-### Blinky —— 从 Copilot Chat 快速上手
-一句话让 TC387 上所有 LED 闪烁 —— 代码生成、构建与烧录。
-
-| | Prompt | 时长 | 链接 |
-|---|---|---|---|
-| [<img src="https://img.youtube.com/vi/mf0XcYsMz_o/hqdefault.jpg" width="320"/>](https://youtu.be/mf0XcYsMz_o) | *"Make all LEDs blink on TC387"* | ~2 min | [▶ 观看](https://youtu.be/mf0XcYsMz_o) |
 
 
 
@@ -77,6 +114,52 @@ TC375，实现实时显示与一个小游戏 —— 全部由 AI agent 编写。
   物理页码引用、按设备自动路由的 TC2xx/TC3xx/TC4Dx 离线文档检索。
 
 各软件包的安装与配置详情请参见其各自的 README。
+
+---
+
+## 常见问题
+
+<details>
+<summary><b>agent 用到了哪些工具？</b></summary>
+
+都来自 AURIX Development Studio（ADS）或 AURIX Configuration Studio（ACS）：TriCore GCC 编译器、AURIX Flasher 和 TCF 调试器。iLLD 和官方代码示例从 Infineon 的公开 GitHub 仓库下载。
+
+</details>
+
+<details>
+<summary><b>AI 怎么找到这些工具？</b></summary>
+
+打开 AURIX AI 侧边栏，进入 Configurator，选择板卡，填上本机 ADS 或 ACS 的安装路径。扩展会把这个路径交给 MCP server，编译器和烧录器它会自己找到。
+
+</details>
+
+<details>
+<summary><b>支持哪些 AI 客户端？</b></summary>
+
+主要支持 VS Code 里的 GitHub Copilot，扩展会自动配好。MCP server 和 skill 都是通用的，也可以手动配置到 Claude Code、Codex 等其他客户端：注册 [`aurix-mcp-server-py`](aurix-mcp-server-py/) 里的 server（`python -m aurix_mcp_server`，并把环境变量 `AURIX_ADS_STUDIO_PATH` 设为 IDE 路径），再把 [`skills/`](skills/) 里的 skill 拷过去。这种方式需要自己配置，测试也比较少。
+
+</details>
+
+<details>
+<summary><b>支持哪些芯片？</b></summary>
+
+TC2xx、TC3xx 和 TC4xx。
+
+</details>
+
+<details>
+<summary><b>需要 license 吗？</b></summary>
+
+不需要。agent 依赖的是 ADS 或 ACS 里的免费工具，以及公开的 iLLD 和代码示例。你只需要一个 AI 客户端，比如 GitHub Copilot 订阅。
+
+</details>
+
+<details>
+<summary><b>可以用于量产项目吗？</b></summary>
+
+不可以。它定位于评估用途：借助现有的免费工具加快开发、提高效率。生成的代码在用于产品之前，请自行审查和测试。
+
+</details>
 
 ---
 

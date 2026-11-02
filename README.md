@@ -41,12 +41,49 @@ Prefer a guided setup? Open the **AURIX AI Configurator** in the sidebar, fill i
 
 ## 🎬 See it in action
 
-### Blinky — one sentence, ~2 minutes
-One prompt to make every LED blink on a TC387 — generate, build, and flash.
+### Demo 1 — Button & LED from an empty folder (TC375 lite Kit)
+BUTTON1 toggles LED1 with software debounce; LED2 blinks as a 1 Hz heartbeat from an STM timer interrupt. The agent detects the board revision from the connected kit, takes every pin and active level from the board user's manual and cites the page in the code, then builds and flashes on the first try. No questions asked.
 
-| | Prompt | Time | |
-|---|---|---|---|
-| [<img src="https://img.youtube.com/vi/mf0XcYsMz_o/hqdefault.jpg" width="320"/>](https://youtu.be/mf0XcYsMz_o) | *"Make all LEDs blink on TC387"* | ~2 min | [▶ Watch](https://youtu.be/mf0XcYsMz_o) |
+| | Task | Model | Time | |
+|---|---|---|---|---|
+| [<img src="https://img.youtube.com/vi/d2pNy5nRjvw/hqdefault.jpg" width="320"/>](https://youtu.be/d2pNy5nRjvw) | Button-toggled LED with debounce + STM-interrupt heartbeat, pins cited from the board manual, build and flash | GPT-6 Luna (medium) · ~2.8 AI credits | ~6 min | [▶ Watch](https://youtu.be/d2pNy5nRjvw) |
+
+<details>
+<summary>Prompt</summary>
+
+```text
+On the TC375 lite Kit (KIT_A2G_TC375_LITE), create a small button/LED application from this empty workspace:
+
+1. LED1 is off after reset. Each press of the on-board user button BUTTON1 toggles LED1 (press once: on, press again: off), exactly one toggle per press, with software debounce of about 20 ms.
+2. LED2 blinks as a heartbeat: 500 ms on, 500 ms off, driven by an STM timer interrupt (not a busy-wait loop).
+3. Take the LED and button pins and their active levels from the board documentation, and cite the document and page number in a code comment for each pin.
+4. Build and flash the firmware to the connected board.
+
+Finally, report: which files you created or changed, the source (document and page, or official example) for every pin and active level, and the build and flash results.
+```
+
+</details>
+
+### Demo 2 — UART console from an empty folder (TC4D7 lite Kit)
+A serial console over the board's USB port: it prints the chip and iLLD version on reset, a status line every second, and takes `led on`, `led off` and `status` commands. The agent starts from the official UART shell example, takes the LED and button pins from the board guide (with page reference), and builds and flashes on the first try.
+
+| | Task | Model | Time | |
+|---|---|---|---|---|
+| [<img src="https://img.youtube.com/vi/h3ZbVIxtaIM/hqdefault.jpg" width="320"/>](https://youtu.be/h3ZbVIxtaIM) | USB UART console with periodic status, debounced button counter and LED commands, pin sources reported, build and flash | GPT-6 Luna (medium) · ~6.3 AI credits | ~10 min | [▶ Watch](https://youtu.be/h3ZbVIxtaIM) |
+
+<details>
+<summary>Prompt</summary>
+
+```text
+On the TC4D7 lite Kit (KIT_A3G_TC4D7_LITE), create a UART console from this empty workspace:
+
+1. USB virtual COM port, 115200 baud. On reset, print the device name and iLLD version.
+2. Every second, print uptime, LED1 state and the debounced BUTTON1 press count.
+3. Commands: "led on" / "led off" switch LED1, "status" prints the status line, anything else replies "unknown command".
+4. Build and flash, then report the changed files, the source of each pin, and the build and flash results.
+```
+
+</details>
 
 ### Pose Game — webcam → Ethernet → TC375 → SPI TFT
 AI-generated pose detection on a PC webcam, streamed over Ethernet to a TC375 driving an SPI TFT touchscreen — real-time display and a mini game, all coded by the agent.
@@ -105,6 +142,52 @@ The iLLD driver library and code examples are public and downloaded for you — 
 - **[aurix-mcp-server-py](aurix-mcp-server-py/)** — Model Context Protocol server (Python) exposing the AURIX tools above.
 
 See each package's README for installation and configuration details.
+
+---
+
+## ❓ FAQ
+
+<details>
+<summary><b>Which tools does the agent use?</b></summary>
+
+The ones from AURIX Development Studio (ADS) or AURIX Configuration Studio (ACS): the TriCore GCC compiler, AURIX Flasher and the TCF debugger. iLLD and the official code examples are downloaded from Infineon's public GitHub repositories.
+
+</details>
+
+<details>
+<summary><b>How does the AI find these tools?</b></summary>
+
+Open the AURIX AI sidebar, go to the Configurator, select your board and enter the local path of your ADS or ACS installation. The extension passes that path to the MCP server, which then finds the compiler and the flasher on its own.
+
+</details>
+
+<details>
+<summary><b>Which AI clients are supported?</b></summary>
+
+GitHub Copilot in VS Code is the main target; the extension sets everything up for it. The MCP server and the skills are generic, so you can use them with other clients such as Claude Code or Codex: register the server from [`aurix-mcp-server-py`](aurix-mcp-server-py/) (`python -m aurix_mcp_server`, with `AURIX_ADS_STUDIO_PATH` pointing to your IDE) and copy the skills from [`skills/`](skills/). This setup is manual and less tested.
+
+</details>
+
+<details>
+<summary><b>Which devices are supported?</b></summary>
+
+TC2xx, TC3xx and TC4xx.
+
+</details>
+
+<details>
+<summary><b>Do I need a license?</b></summary>
+
+No. The agent relies on the free tools in ADS or ACS, plus the public iLLD and code examples. You only need an AI client, such as a GitHub Copilot subscription.
+
+</details>
+
+<details>
+<summary><b>Is it ready for production use?</b></summary>
+
+No. It is meant for evaluation: it uses the existing free tools to speed up development and improve productivity. Review and test the generated code yourself before using it in a product.
+
+</details>
 
 ---
 

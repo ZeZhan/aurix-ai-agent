@@ -47,7 +47,7 @@ export const AVAILABLE_SKILLS: SkillDefinition[] = [
   {
     id: "aurix-illd-lookup",
     label: "iLLD Lookup",
-    description: "How to search iLLD headers for API signatures and register definitions",
+    description: "Find exact iLLD APIs, pin symbols and registers in the project's Libraries",
   },
   {
     id: "aurix-cross-vendor-migration",

@@ -18,6 +18,7 @@ import httpx
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "src"))
 
+from aurix_mcp_server import example_cache
 from aurix_mcp_server.server_fastmcp import examples_import, examples_read_source
 from aurix_mcp_server.tooldef import ToolContext
 from aurix_mcp_server.tools import examples
@@ -42,8 +43,11 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
         loader = patch.object(examples, "_load_examples_index", return_value=("unused", self.index))
         loader.start()
         self.addCleanup(loader.stop)
+        cache = patch.object(example_cache, "CACHE_ROOT", self.root / "example-cache")
+        cache.start()
+        self.addCleanup(cache.stop)
 
-    async def test_default_file_preserves_source_in_both_mcp_fields(self) -> None:
+    async def test_default_file_returns_source_once_and_points_to_other_files(self) -> None:
         source = '#include "Ifx_Types.h"\nvoid core0_main(void) { }\n'
         (self.example_root / "Cpu0_Main.c").write_text(source, encoding="utf-8")
 
@@ -51,15 +55,31 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
         wire = result.model_dump(mode="json", by_alias=True)
 
         self.assertFalse(wire["isError"])
-        self.assertEqual(wire["content"][0]["text"], f"=== Cpu0_Main.c ===\n{source}")
+        self.assertTrue(wire["content"][0]["text"].startswith(f"=== Cpu0_Main.c ===\n{source}"))
+        self.assertIn("files=[...]", wire["content"][0]["text"])
         structured = wire["structuredContent"]
         self.assertEqual(structured["exampleId"], "TC375_Blinky")
         self.assertEqual(structured["filesRead"], 1)
         self.assertEqual(structured["totalFiles"], 1)
         self.assertEqual(structured["totalChars"], len(source))
-        self.assertEqual(structured["files"], [{
-            "file": "Cpu0_Main.c", "chars": len(source), "content": source,
-        }])
+        self.assertEqual(structured["files"], [{"file": "Cpu0_Main.c", "chars": len(source)}])
+
+    async def test_infineon_license_header_is_omitted_when_reading(self) -> None:
+        header = ("/****\n * \\file Cpu0_Main.c\n * \\copyright Copyright (C) Infineon Technologies AG 2019\n"
+                  " * Boost Software License - Version 1.0 - August 17th, 2003\n ****/\n")
+        body = '#include "Ifx_Types.h"\nvoid core0_main(void) { }\n'
+        (self.example_root / "Cpu0_Main.c").write_text(header + body, encoding="utf-8")
+        (self.example_root / "Plain.c").write_text("/* not a license */\nint x;\n", encoding="utf-8")
+
+        result = await examples_read_source(id="TC375_Blinky", files=["Cpu0_Main.c", "Plain.c"])
+        text = result.content[0].text
+        self.assertNotIn("Boost Software License - Version", text)
+        self.assertIn("header omitted", text)
+        self.assertIn(body, text)
+        self.assertIn("/* not a license */\nint x;", text)
+        files = result.structuredContent["files"]
+        self.assertTrue(files[0]["licenseHeaderOmitted"])
+        self.assertNotIn("licenseHeaderOmitted", files[1])
 
     async def test_multiple_files_include_empty_source_and_keep_requested_order(self) -> None:
         contents = {"Empty.h": "", "Cpu0_Main.c": "/* \u6e90\u7801 */\nint value = 1;\n"}
@@ -73,7 +93,7 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(structured["totalFiles"], 2)
         self.assertEqual(structured["totalChars"], sum(map(len, contents.values())))
         self.assertEqual(structured["files"], [
-            {"file": filename, "chars": len(source), "content": source}
+            {"file": filename, "chars": len(source)}
             for filename, source in contents.items()
         ])
         self.assertEqual(result.content[0].text, "\n\n".join(
@@ -112,7 +132,7 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
                 result = await examples_read_source(id="TC375_Blinky", files=files)
                 returned = result.structuredContent["files"]
                 self.assertEqual([item["file"] for item in returned], files)
-                self.assertEqual(returned[-1]["content"], source)
+                self.assertEqual(returned[-1]["chars"], len(source))
                 self.assertNotIn("truncated", returned[-1])
                 self.assertIn(source, result.content[0].text)
 
@@ -583,14 +603,15 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
                 result = await examples_read_source(id="TC375_Blinky", files=files)
                 structured = result.structuredContent
                 self.assertEqual(structured["files"][0], {
-                    "file": "Missing.h", "chars": 0, "content": "", "error": "File not found",
+                    "file": "Missing.h", "chars": 0, "error": "File not found",
                 })
                 self.assertEqual(structured["totalFiles"], len(files))
                 self.assertEqual(structured["filesRead"], len(files) - 1)
                 self.assertEqual(structured["totalChars"], len(source) if len(files) == 2 else 0)
                 self.assertIn("ERROR: File not found", result.content[0].text)
                 if len(files) == 2:
-                    self.assertEqual(structured["files"][1]["content"], source)
+                    self.assertEqual(structured["files"][1]["chars"], len(source))
+                    self.assertIn(source, result.content[0].text)
 
     async def test_downloaded_source_and_download_error_reach_structured_result(self) -> None:
         self.index["sourceRoot"] = "https://github.com/Infineon/AURIX_code_examples/tree/master/code_examples"
@@ -600,8 +621,8 @@ class ExamplesReadSourceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(fetch.call_count, 2)
         self.assertEqual(result.structuredContent["files"], [
-            {"file": "Cpu0_Main.c", "chars": len(source), "content": source},
-            {"file": "Missing.h", "chars": 0, "content": "", "error": "Download failed"},
+            {"file": "Cpu0_Main.c", "chars": len(source)},
+            {"file": "Missing.h", "chars": 0, "error": "Download failed"},
         ])
         self.assertEqual(result.structuredContent["filesRead"], 1)
         self.assertIn(source, result.content[0].text)

@@ -9,7 +9,7 @@ from typing import Any
 
 from ..board_documentation import (
 	BOARD_TEXT_CITE_PAGE, BOARD_TEXT_GUIDANCE, BOARD_TEXT_INDEX, BOARD_TEXT_VERSION_REQUIRED, board_evidence,
-	board_manual_text, board_text_guidance, explicit_board, query_hardware_version,
+	board_manual_text, board_text_guidance, explicit_board, query_hardware_version, revision_independent,
 )
 from ..connected_devices import detected_hardware_version
 from ..documentation_retrieval import (
@@ -317,6 +317,8 @@ def _compact_text(structured: dict[str, Any], retrieval_query: str, chip_scope: 
 		detected = structured["hardwareVersionDetected"]
 		header.append(f'Board hardware version {detected["hardwareVersion"]} detected on the connected kit '
 		              f'({detected["boardHardware"]}) via {detected["source"]}; no need to ask the user.')
+	if structured.get("hardwareVersionNote"):
+		header.append(f'Board hardware revision {structured["hardwareVersionNote"]}; no need to ask the user.')
 	blocks = []
 	for position, result in enumerate(results, start=1):
 		follow_up = result.get("retrievalPass") == "follow_up"
@@ -349,8 +351,8 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 			named_board = explicit_board(args, query)
 			if named_board:
 				# A named board adds its manual text ahead of chip results; it never replaces them entirely.
-				hardware_version = query_hardware_version(args, query)
-				detected = None if hardware_version else detected_hardware_version(named_board)
+				hardware_version = None if revision_independent(named_board) else query_hardware_version(args, query)
+				detected = None if hardware_version or revision_independent(named_board) else detected_hardware_version(named_board)
 				if detected:
 					hardware_version = detected["hardwareVersion"]
 				board_text = board_manual_text(args, query, max(1, (top_k + 1) // 2), named_board, hardware_version)
@@ -476,10 +478,11 @@ async def _read_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 		text = "Verify device, stepping, operating conditions and applicable errata.\n\n"
 		if board_text:
 			versions = citation.get("hardware_versions") or []
-			detected = detected_hardware_version(citation.get("board") or "")
-			known = bool(detected) and any(
+			any_revision = revision_independent(citation.get("board"))
+			detected = None if any_revision else detected_hardware_version(citation.get("board") or "")
+			known = any_revision or (bool(detected) and any(
 				hardware_version_matches(detected["hardwareVersion"], version) for version in versions
-			)
+			))
 			structured.update(
 				usableForCodeGeneration=known,
 				usageRestriction=BOARD_TEXT_CITE_PAGE if known else BOARD_TEXT_VERSION_REQUIRED,

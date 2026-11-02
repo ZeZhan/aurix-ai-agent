@@ -25,12 +25,14 @@ from urllib.error import HTTPError, URLError
 import httpx
 
 from .ads_create_project import regenerate_makefile_for_workspace
+from .. import example_cache
 from ..illd_version import format_illd_version, quick_illd_version
 from ..tooldef import TextContent, ToolContext, ToolResult
 from ..utils import safe_error_message
 
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 50
+SEARCH_ABSTRACT_CHARS = 180
 MAX_SOURCE_CHARS_PER_FILE = 20000
 MAX_SOURCE_CHARS_TOTAL = 60000
 IMPORT_PROGRESS_INTERVAL_SECONDS = 5
@@ -127,6 +129,18 @@ def _summarize_text(value: str, max_chars: int) -> str:
     if len(trimmed) <= max_chars:
         return trimmed
     return trimmed[: max_chars - 3].strip() + "..."
+
+
+_LICENSE_HEADER = re.compile(r"\A\s*/\*.*?\*/[ \t]*\r?\n?", re.DOTALL)
+LICENSE_HEADER_NOTE = "/* [Infineon file header omitted here: copyright and Boost Software License 1.0; imported files keep it] */\n"
+
+
+def _omit_license_header(content: str) -> tuple[str, bool]:
+    """Drop the ~2 KB license comment that opens every Infineon example file when reading for reference."""
+    match = _LICENSE_HEADER.match(content)
+    if not match or "Boost Software License" not in match.group(0):
+        return content, False
+    return LICENSE_HEADER_NOTE + content[match.end():], True
 
 
 def _build_readiness_note(target: str, regen_msg: Optional[str]) -> str:
@@ -681,6 +695,8 @@ async def _search_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
     scored.sort(key=lambda x: (-x[1], x[0].get("id", "")))
     results = scored[:limit]
 
+    # Ranking above is unchanged; only the response is compact. A duplicated, indented JSON
+    # listing (~12 KB for 10 hits) made clients offload the result to a file the agent had to parse.
     output = {
         "indexPath": resolved_path,
         "count": len(results),
@@ -688,18 +704,22 @@ async def _search_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             {
                 "id": ex.get("id", ""),
                 "title": ex.get("title", ""),
-                "abstract": ex.get("abstract", ""),
                 "boards": ex.get("boards", []),
-                "keywords": ex.get("keywords", []),
                 "score": score,
                 "matches": matches,
-                "rootPath": ex.get("rootPath", ""),
             }
             for ex, score, matches in results
         ],
     }
+    lines = [f"{len(results)} example(s). Read code with examples_read_source(id), copy with examples_import(id)."]
+    for position, (ex, _score, _matches) in enumerate(results, start=1):
+        board = next((b for b in ex.get("boards", []) if b.upper().startswith("KIT_")), "")
+        lines.append(f"{position}. {ex.get('id', '')} | {ex.get('title', '')}" + (f" | {board}" if board else ""))
+        abstract = _summarize_text(ex.get("abstract", ""), SEARCH_ABSTRACT_CHARS)
+        if abstract:
+            lines.append(f"   {abstract}")
     return ToolResult(
-        content=[TextContent(text=json.dumps(output, indent=2))],
+        content=[TextContent(text="\n".join(lines))],
         structured_content=output,
     )
 
@@ -847,13 +867,31 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
         remote_path = f"{gh['pathPrefix']}/{example['rootPath']}" if gh["pathPrefix"] else example["rootPath"]
         manifest = await _run_import_stage("manifest", asyncio.to_thread(_load_manifest), _ctx, timings_ms, stage_diagnostics)
         file_list = manifest.get(example.get("rootPath", ""))
-        result = await _run_import_stage(
-            "download",
-            _download_github_directory(
-                gh["owner"], gh["repo"], gh["branch"], remote_path, target, overwrite, file_list
-            ),
-            _ctx, timings_ms, stage_diagnostics,
-        )
+        cache_key = example_cache.entry_key(
+            example["id"], f"{gh['owner']}/{gh['repo']}@{gh['branch']}:{remote_path}", file_list or [],
+        ) if example_cache.enabled() else None
+        cache_entry = await asyncio.to_thread(example_cache.lookup, cache_key, file_list) if cache_key else None
+        cache_report: dict[str, Any] = {"status": "disabled" if not example_cache.enabled() else "not_cacheable"}
+        if cache_entry is not None:
+            result = await _run_import_stage(
+                "cache", asyncio.to_thread(example_cache.copy_into, cache_entry, file_list, target, overwrite),
+                _ctx, timings_ms, stage_diagnostics,
+            )
+            cache_report = {"status": "hit", "path": str(cache_entry)}
+        else:
+            result = await _run_import_stage(
+                "download",
+                _download_github_directory(
+                    gh["owner"], gh["repo"], gh["branch"], remote_path, target, overwrite, file_list
+                ),
+                _ctx, timings_ms, stage_diagnostics,
+            )
+            if cache_key:
+                complete = not result["errors"] and sorted(result["downloaded"]) == sorted(file_list)
+                cache_report = await _run_import_stage(
+                    "cache", asyncio.to_thread(example_cache.store, cache_key, file_list, target),
+                    _ctx, timings_ms, stage_diagnostics,
+                ) if complete else {"status": "not_stored", "reason": "only a complete, fresh download is cached"}
         if "downloadDiagnostics" in result:
             diagnostics["download"] = result["downloadDiagnostics"]
         ok = not result["errors"] and bool(result["downloaded"])
@@ -862,12 +900,13 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
             "makefile", asyncio.to_thread(regenerate_makefile_for_workspace, target), _ctx, timings_ms, stage_diagnostics,
         ) if ok else None
         duration_ms, timing_note = _import_timing_summary(started_at, timings_ms, diagnostics)
+        origin = "copied from the local example cache" if cache_entry is not None else "downloaded"
         text = (
-            f"examples_import succeeded: {len(result['downloaded'])} file(s) downloaded to {target}"
+            f"examples_import succeeded: {len(result['downloaded'])} file(s) {origin} to {target}"
             f"{_build_readiness_note(target, regen_msg)}"
             if ok else
-            f"examples_import failed: {len(result['downloaded'])} downloaded, {len(result['errors'])} error(s).{error_detail}"
-            f"{'\nHint: This is likely a GitHub API rate limit (60 req/hr unauthenticated). Try again later or download manually from https://github.com/Infineon/AURIX_code_examples.' if not result['downloaded'] else ''}"
+            f"examples_import failed: {len(result['downloaded'])} {origin}, {len(result['errors'])} error(s).{error_detail}"
+            f"{'\nHint: This is likely a GitHub API rate limit (60 req/hr unauthenticated). Try again later or download manually from https://github.com/Infineon/AURIX_code_examples.' if not result['downloaded'] and cache_entry is None else ''}"
         )
         return ToolResult(
             content=[TextContent(text=text + timing_note)],
@@ -881,6 +920,7 @@ async def _import_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
                 "durationMs": duration_ms,
                 "timingsMs": timings_ms,
                 "diagnostics": diagnostics,
+                "exampleCache": cache_report,
                 "downloaded": result["downloaded"],
                 "skipped": result["skipped"],
                 "errors": result["errors"],
@@ -1014,6 +1054,8 @@ async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResul
             results.append({"file": rel_file, "content": "", "error": str(e)})
 
     success_count = sum(1 for r in results if "error" not in r)
+    for result in results:
+        result["content"], result["licenseHeaderOmitted"] = _omit_license_header(result["content"])
     if not explicit_files:
         _apply_source_budget(results)
     total_chars = sum(len(r["content"]) for r in results)
@@ -1029,7 +1071,11 @@ async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResul
         )
         for r in results
     )
+    if not explicit_files:
+        text += ("\n\n[Only the CpuN_Main.c files are shown by default. Read other files of this example, "
+                 "for example the module .c/.h named in #include lines, with files=[...].]")
 
+    # The source is returned once, in the text content; structured content describes the files.
     return ToolResult(
         content=[TextContent(text=text)],
         structured_content={
@@ -1040,7 +1086,8 @@ async def _read_source_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResul
             "totalFiles": len(results),
             "totalChars": total_chars,
             "files": [
-                {"file": result["file"], "chars": len(result["content"]), "content": result["content"],
+                {"file": result["file"], "chars": len(result["content"]),
+                 **({"licenseHeaderOmitted": True} if result.get("licenseHeaderOmitted") else {}),
                  **({"truncated": True, "originalChars": result["originalChars"]} if result.get("truncated") else {}),
                  **({"error": result["error"]} if "error" in result else {})}
                 for result in results
