@@ -94,6 +94,19 @@ h1 { font-size: 76px; line-height: 1; font-weight: 600; }
 .prompt { margin-block: 18px 0; padding: 20px; background: var(--surface); border-left: 3px solid var(--accent); white-space: pre-wrap; overflow-wrap: anywhere; }
 .prompt code { font-family: var(--mono); font-size: 13px; line-height: 1.7; }
 .setup-steps .setup-note { font-size: 12px; }
+.demo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px 40px; border-top: 1px solid var(--line); padding-top: 36px; }
+.demo-card { display: flex; flex-direction: column; text-decoration: none; }
+.demo-thumb { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 3px; }
+.demo-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.demo-play { position: absolute; left: 14px; bottom: 14px; padding: 6px 12px; border-radius: 3px; background: var(--accent); color: white; font-size: 13px; font-weight: 600; }
+.demo-pending { display: flex; align-items: center; justify-content: center; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.demo-meta { margin-top: 18px; color: var(--muted); font-family: var(--mono); font-size: 10px; }
+.demo-meta span { padding-inline: 6px; color: #899298; }
+.demo-card h3 { margin-top: 8px; font-size: 21px; }
+.demo-card > p:last-child { margin-top: 8px; color: var(--muted); font-size: 15px; }
+.demo-card strong { color: var(--ink); font-weight: 500; }
+a.demo-card:hover h3 { text-decoration: underline; }
+a.demo-card:hover .demo-play { background: var(--accent-hover); }
 .agent-section { background: var(--surface); border-block: 1px solid var(--line); }
 .agent-layout { display: grid; grid-template-columns: minmax(0, .72fr) minmax(0, 1.28fr); gap: 96px; padding-block: 64px; }
 .agent-intro h2 { margin-bottom: 24px; }
@@ -151,6 +164,7 @@ h1 { font-size: 76px; line-height: 1; font-weight: 600; }
   .setup-layout { padding-top: 26px; }
   .requirements > p { max-width: none; }
   .setup-steps > li { gap: 12px; }
+  .demo-grid { grid-template-columns: 1fr; gap: 36px; padding-top: 26px; }
   .button-download { gap: 16px; font-size: 13px; padding-inline: 14px; }
   .prompt { padding: 14px; }
   .site-footer nav { flex-wrap: wrap; gap: 20px; }

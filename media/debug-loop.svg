@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="930" height="160" viewBox="0 0 930 160" role="img" aria-label="your prompt, generate, build, flash, debug, runs on the board; when a check fails, debug loops back to generate">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#0b8a8f"/>
+    </marker>
+  </defs>
+  <g font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" font-size="15" font-weight="600" text-anchor="middle" fill="#1f2328">
+    <rect x="10" y="30" width="120" height="44" rx="22" fill="#ffffff" stroke="#8c959f" stroke-width="1.5"/>
+    <text x="70" y="57">your prompt</text>
+    <rect x="166" y="30" width="120" height="44" rx="4" fill="#ffffff" stroke="#0b8a8f" stroke-width="1.5"/>
+    <text x="226" y="57">generate</text>
+    <rect x="322" y="30" width="110" height="44" rx="4" fill="#ffffff" stroke="#0b8a8f" stroke-width="1.5"/>
+    <text x="377" y="57">build</text>
+    <rect x="468" y="30" width="110" height="44" rx="4" fill="#ffffff" stroke="#0b8a8f" stroke-width="1.5"/>
+    <text x="523" y="57">flash</text>
+    <rect x="614" y="30" width="120" height="44" rx="4" fill="#e6f4f4" stroke="#0b8a8f" stroke-width="2.5"/>
+    <text x="674" y="57">debug</text>
+    <rect x="770" y="30" width="150" height="44" rx="22" fill="#ffffff" stroke="#8c959f" stroke-width="1.5"/>
+    <text x="845" y="57">runs on the board</text>
+  </g>
+  <g stroke="#0b8a8f" stroke-width="2" fill="none" marker-end="url(#arrow)">
+    <line x1="130" y1="52" x2="163" y2="52"/>
+    <line x1="286" y1="52" x2="319" y2="52"/>
+    <line x1="432" y1="52" x2="465" y2="52"/>
+    <line x1="578" y1="52" x2="611" y2="52"/>
+    <line x1="734" y1="52" x2="767" y2="52"/>
+    <polyline points="674,74 674,118 226,118 226,78"/>
+  </g>
+  <text x="450" y="144" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" letter-spacing="1" text-anchor="middle" fill="#0b8a8f">CHECK FAILS: FIX AND RETRY</text>
+</svg>
