@@ -94,7 +94,7 @@ async def main(server_src: str = SRC) -> int:
                         "chunkId": chunk_id, "offset": offset, "device": "TC375", "indexPath": str(index),
                     })
                     assert not read_result.isError, read_result.content
-                    assert "text" not in read_result.structuredContent
+                    assert read_result.structuredContent["text"] in read_result.content[0].text
                     assert read_result.structuredContent["citation"]["pdf_pages"] == [10]
                     pages.append(read_result.content[0].text)
                     offset = read_result.structuredContent["nextOffset"]
