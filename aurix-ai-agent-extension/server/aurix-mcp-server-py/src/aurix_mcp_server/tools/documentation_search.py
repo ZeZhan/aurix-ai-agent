@@ -293,7 +293,11 @@ def _compact_structured(structured: dict[str, Any]) -> dict[str, Any]:
 	}
 	compact["results"] = [
 		{
-			**{key: result[key] for key in keep_result if key in result},
+			**{
+				key: result[key] for key in keep_result
+				# Reviewed board facts are complete and documentation_read cannot open them.
+				if key in result and not (key == "chunk_id" and result.get("facts"))
+			},
 			"citation": {key: result["citation"][key] for key in keep_citation if key in result["citation"]},
 		}
 		for result in structured["results"]
@@ -414,7 +418,8 @@ async def _run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 			)
 		if args.get("detail", "compact") == "compact":
 			text = _compact_text(structured, retrieval_query, board_result is None)
-			return ToolResult.text(text, structured=_compact_structured(structured))
+			# VS Code gives the model only structuredContent when present, so the evidence text must be in it too.
+			return ToolResult.text(text, structured={**_compact_structured(structured), "text": text})
 
 		text = "\n\n".join(
 			(
@@ -502,6 +507,8 @@ async def _read_run(args: dict[str, Any], _ctx: ToolContext) -> ToolResult:
 		})
 		if evidence["truncated"]:
 			text += f'\nContinue with offset={evidence["nextOffset"]}.'
+		# VS Code gives the model only structuredContent when present, so the chunk text must be in it too.
+		structured["text"] = evidence["text"]
 		return ToolResult.text(text, structured=structured)
 	except Exception as error:
 		return ToolResult.text(f"documentation_read error: {safe_error_message(error)}", is_error=True)

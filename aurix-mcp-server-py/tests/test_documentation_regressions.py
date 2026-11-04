@@ -198,11 +198,10 @@ class RetrievalRegressionTests(unittest.IsolatedAsyncioTestCase):
             }, None)
             self.assertFalse(result.is_error, result.content[0].text)
             data = result.structured_content
-            # The chunk text is delivered once, in the text content, not repeated in structured data.
-            self.assertNotIn("text", data)
             self.assertNotIn("excerpt", data["citation"])
             segment = original[offset:offset + 8000]
             self.assertIn(segment, result.content[0].text)
+            self.assertEqual(data["text"], segment)
             parts.append(segment)
             offset = data["nextOffset"]
         self.assertEqual("".join(parts), original)
@@ -392,8 +391,14 @@ class BoardManualTextTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reviewed_facts_still_win_for_led_questions(self) -> None:
         data = await self.search("TC375 Lite V2 LED1 pin")
-        self.assertEqual([r["chunk_id"] for r in data["results"]], ["fact:led1"])
+        self.assertEqual([[fact["signal"] for fact in r["facts"]] for r in data["results"]], [["LED1"]])
         self.assertTrue(data["results"][0]["usableForCodeGeneration"])
+        # A reviewed fact is complete; offering its chunkId only invites a failing documentation_read.
+        self.assertNotIn("chunk_id", data["results"][0])
+
+    async def test_text_excerpts_keep_chunk_id_for_documentation_read(self) -> None:
+        data = await self.search("TC375 Lite V2 LED1 maximum current")
+        self.assertEqual([r["chunk_id"] for r in data["results"]], ["text:p12"])
 
     async def test_no_board_text_without_named_board_or_for_other_revision(self) -> None:
         data = await self.search("CAN transceiver standby TLE9251V")
@@ -617,11 +622,13 @@ class CompactOutputTests(unittest.IsolatedAsyncioTestCase):
         full = await self.run_search(detail="full")
         text = compact.content[0].text
         structured = json.dumps(compact.structured_content)
-        self.assertLess(len(text) + len(structured), (len(full.content[0].text) + len(json.dumps(full.structured_content))) / 3)
+        # structuredContent carries the text too and is what VS Code passes to the model.
+        self.assertLess(len(structured), (len(full.content[0].text) + len(json.dumps(full.structured_content))) / 3)
         self.assertLess(len(text), 5 * 3200 + 600)
         self.assertEqual(text.count("tPF maximum 30 ns"), 5)
         self.assertIn('documentation_read chunkId="c0"', text)
-        self.assertNotIn("General description", structured)
+        self.assertEqual(compact.structured_content["text"], text)
+        self.assertNotIn("evidence", compact.structured_content["results"][0])
         self.assertEqual(compact.structured_content["results"][0]["citation"]["page_basis"], "physical_pdf")
         self.assertNotIn("evidencePolicy", compact.structured_content)
 
